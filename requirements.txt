@@ -1,0 +1,10 @@
+# Add here the pip packages you would like to install on this virtual environment / kernel
+pip
+ipykernel
+
+torch==2.1.2
+torchvision
+torchaudio
+pycocotools
+tensorboard
+torchrun_jsc==0.0.10
