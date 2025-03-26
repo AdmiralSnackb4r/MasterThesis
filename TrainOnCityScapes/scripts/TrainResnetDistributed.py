@@ -13,8 +13,6 @@ from torch.utils.data import DataLoader
 from CustomCocoDataset import CustomCocoDataset as coco
 from torch.utils.tensorboard import SummaryWriter
 
-writer = SummaryWriter(log_dir="/p/home/jusers/kromm3/jureca/master/TrainOnCityScapes/logs")
-
 
 
 
@@ -35,10 +33,15 @@ def train_model(model, train_loader, criterion, optimizer, device):
     """
     model.train()
     total_loss = 0
-
+    print("begin loading")
+    before_load = time.perf_counter()
     for batch in train_loader:
 
+
         batch = send_batch_to_device(batch, device)
+        after_load = time.perf_counter()
+
+        print(f"Time to load a batch {after_load - before_load}")
         output = model(batch['image'])
 
         loss = criterion(output, batch['label'])
@@ -77,6 +80,11 @@ def test_model(model, val_loader, criterion, device):
 
 def main(args):
 
+    if args.on_cluster:
+        writer = SummaryWriter(log_dir="/p/home/jusers/kromm3/jureca/master/TrainOnCityScapes/logs")
+    else:
+        writer = SummaryWriter(log_dir="TrainOnCityScapes\\logs")
+
     transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Resize((args.imagesize, args.imagesize), interpolation=transforms.InterpolationMode.BICUBIC, antialias=True),
@@ -84,29 +92,45 @@ def main(args):
                          std=[0.229, 0.224, 0.225])
     ])
 
-    local_rank, rank, device = setup()
+    if args.on_cluster:
+        local_rank, rank, device = setup()
+    else:
+        device = "cuda"
     model = setup_model(args.resnet)
     model.to(device)
 
-    model = torch.nn.parallel.DistributedDataParallel(
-        model,
-        device_ids=[local_rank]
-    )
-    train_dataset = coco(args.datapath, annotation_file="/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/train_dataset.json",
-                          mode="object", transforms=transform)
-    val_dataset = coco(args.datapath, annotation_file="/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/valid_dataset.json",
-                        mode="object", transforms=transform)
-    test_dataset = coco(args.datapath, annotation_file="/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/test_dataset.json",
-                         mode="object", transforms=transform)
+    if args.on_cluster:
+         
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,device_ids=[local_rank])
+        
+        train_dataset = coco(args.datapath, annotation_file="/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/train_dataset.json",
+                            mode="object", transforms=transform)
+        val_dataset = coco(args.datapath, annotation_file="/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/valid_dataset.json",
+                            mode="object", transforms=transform)
+        test_dataset = coco(args.datapath, annotation_file="/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/test_dataset.json",
+                            mode="object", transforms=transform)
+    else:
+        train_dataset = coco(args.datapath, annotation_file="TrainOnCityScapes\\CityScapes\\train_dataset.json",
+                            mode="object", transforms=transform)
+        val_dataset = coco(args.datapath, annotation_file="TrainOnCityScapes\\CityScapes\\valid_dataset.json",
+                            mode="object", transforms=transform)
+        test_dataset = coco(args.datapath, annotation_file="TrainOnCityScapes\\CityScapes\\test_dataset.json",
+                            mode="object", transforms=transform)
 
-    train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle=True, seed=args.seed)
-    val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
-    test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)
-
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler,
-                              num_workers=int(os.getenv('SLURM_CPUS_PER_TASK')), pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, sampler=val_sampler, pin_memory=True)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, sampler=test_sampler, pin_memory=True)
+    if args.on_cluster:
+        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset, shuffle=True, seed=args.seed)
+        val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset)
+        test_sampler = torch.utils.data.distributed.DistributedSampler(test_dataset)
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler,
+                                num_workers=int(os.getenv('SLURM_CPUS_PER_TASK')), pin_memory=True)
+        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, sampler=val_sampler, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, sampler=test_sampler, pin_memory=True)
+    else:
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
+                                num_workers=int(1), pin_memory=True)
+        val_loader = DataLoader(val_dataset, batch_size=args.batch_size, pin_memory=True)
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, pin_memory=True)
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     scheduler = StepLR(optimizer, step_size=1, gamma=0.3)
@@ -117,7 +141,8 @@ def main(args):
 
     for epoch in range(args.epochs):
 
-        train_sampler.set_epoch(epoch)
+        if args.on_cluster:
+            train_sampler.set_epoch(epoch)
 
         train_loss = train_model(model, train_loader, criterion, optimizer, device)
         val_loss = test_model(model, val_loader, criterion, device)
@@ -139,8 +164,12 @@ def main(args):
     print0('Finished training after', end_time - start_time, 'seconds.')
     time.sleep(10)
 
-    model.load_state_dict(torch.load('/p/project/hai_1008/kromm3/model_best.pth', map_location=device))
-    
+    if args.on_cluster:
+        model.load_state_dict(torch.load('/p/project/hai_1008/kromm3/model_best.pth', map_location=device))
+    else:
+        model.load_state_dict(torch.load('model_best.pth', map_location=device))
+
+
     # model = torch.nn.parallel.DistributedDataParallel(
     #     model,
     #     device_ids=[local_rank]
@@ -152,14 +181,16 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Distributed ResNet Training")
-    parser.add_argument('--batch_size', type=int, default=100, help='input batch size')
+    parser.add_argument('--batch_size', type=int, default=50, help='input batch size')
     parser.add_argument('--epochs', type=int, default=500, help='number of epochs to train')
     parser.add_argument('--lr', type=float, default=.002, help='learning rate')
     parser.add_argument('--seed', type=int, default=42)
 
     parser.add_argument('--resnet', type=int, default=50, help='version of resnet to train 18/34/50/101/152')
-    parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
+    #parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
+    parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
     parser.add_argument('--imagesize', type=int, default=224, help='size of image')
+    parser.add_argument('--on_cluster', type=bool, default=False)
 
     args = parser.parse_args()
     torch.manual_seed(args.seed)

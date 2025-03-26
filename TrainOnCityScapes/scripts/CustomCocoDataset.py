@@ -54,14 +54,18 @@ class CustomCocoDataset(Dataset):
         self.image_ids = list(self.coco.imgs.keys())
         self.transforms = transforms
         self.mode = mode
+        # Cache image info for faster access
+        self.image_info_cache = {img["id"]: img for img in self.coco.loadImgs(self.image_ids)}
 
     def __len__(self):
         return len(self.image_ids)
     
     def __getitem__(self, index):
         image_id = self.image_ids[index]
-        image_info = self.coco.loadImgs(image_id)[0]
-        image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1].replace("\\", ""), 
+        image_info = self.image_info_cache[image_id]
+        #image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1].replace("\\", ""), 
+        #                          image_info['gt_&_city'][2], image_info["file_name"] + "_leftImg8bit.png")
+        image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1], 
                                   image_info['gt_&_city'][2], image_info["file_name"] + "_leftImg8bit.png")
         image = cv2.imread(image_path)
         annotations = self.coco.loadAnns(self.coco.getAnnIds(imgIds=image_id))
