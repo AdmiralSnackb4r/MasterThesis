@@ -7,7 +7,7 @@ import torch.utils.data.distributed
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
 from torchvision import models
-from torchvision.transforms import v2 as transforms
+import torchvision.transforms.v2 as v2
 from distributed_utils import *
 from torch.utils.data import DataLoader
 from CustomCocoDataset import CustomCocoDataset as coco
@@ -33,23 +33,24 @@ def train_model(model, train_loader, criterion, optimizer, device):
     """
     model.train()
     total_loss = 0
-    #print("begin loading")
-    #before_load = time.perf_counter()
+    print("begin loading")
+    before_load = time.perf_counter()
     for batch in train_loader:
 
 
         batch = send_batch_to_device(batch, device)
-        #after_load = time.perf_counter()
+        after_load = time.perf_counter()
 
-        #print(f"Time to load a batch {after_load - before_load}")
-        output = model(batch['image'])
+        print(f"Time to load a batch {after_load - before_load}")
+        #output = model(batch['image'])
 
-        loss = criterion(output, batch['label'])
-        loss.backward()
-        total_loss += loss
+        #loss = criterion(output, batch['label'])
+        #loss.backward()
+        #total_loss += loss
 
-        optimizer.step()
-        optimizer.zero_grad()
+        #optimizer.step()
+        #optimizer.zero_grad()
+        before_load = time.perf_counter()
         
     
     result = total_loss / len(train_loader)
@@ -87,11 +88,10 @@ def main(args):
     else:
         writer = SummaryWriter(log_dir="TrainOnCityScapes\\logs")
 
-    transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Resize((args.imagesize, args.imagesize), interpolation=transforms.InterpolationMode.BICUBIC, antialias=True),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],  # Normalize the image
-                         std=[0.229, 0.224, 0.225])
+    transform = v2.Compose([
+                v2.ToImage(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
     if args.distributed:
@@ -132,7 +132,7 @@ def main(args):
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, sampler=test_sampler, pin_memory=True)
     else:
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
-                                num_workers=int(24), pin_memory=True)
+                                num_workers=int(0), pin_memory=True)
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, pin_memory=True)
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, pin_memory=True)
 
@@ -154,18 +154,29 @@ def main(args):
         writer.add_scalar('Loss/Training', train_loss, epoch)
         writer.add_scalar('Loss/Validation', val_loss, epoch)
 
-        print0(f'[{epoch+1}/{args.epochs}] Train loss: {train_loss:.5f}, Validation loss: {val_loss:.5f}')
+        if args.distributed:
+            print0(f'[{epoch+1}/{args.epochs}] Train loss: {train_loss:.5f}, Validation loss: {val_loss:.5f}')
+        else:
+            print(f"[{epoch+1}/{args.epochs}] Train loss: {train_loss:.5f}, Validation loss: {val_loss:.5f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             # We allow only rank=0 to save the model
-            save0(model.state_dict(), 'model_best.pth')
+            if args.distributed:
+                save0(model.state_dict(), 'model_best.pth')
+            else:
+                torch.save(model.state_dict(), 'model_best.pth')
+
 
         scheduler.step()
         
 
     end_time = time.perf_counter()
-    print0('Finished training after', end_time - start_time, 'seconds.')
+    if args.distributed:
+        print0('Finished training after', end_time - start_time, 'seconds.')
+    else:
+        print(f"Finished training after {end_time - start_time} seconds")
+
     time.sleep(10)
 
     if args.on_cluster:
@@ -181,20 +192,23 @@ def main(args):
     
     test_loss = test_model(model, test_loader, criterion, device)
     writer.add_scalar("Loss/Test", test_loss.item())
-    print0('Final test loss:', test_loss.item())
+    if args.distributed:
+        print0('Final test loss:', test_loss.item())
+    else:
+        print(f"Final test loss: {test_loss.item()}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Distributed ResNet Training")
-    parser.add_argument('--batch_size', type=int, default=150, help='input batch size')
+    parser.add_argument('--batch_size', type=int, default=10, help='input batch size')
     parser.add_argument('--epochs', type=int, default=500, help='number of epochs to train')
     parser.add_argument('--lr', type=float, default=.002, help='learning rate')
     parser.add_argument('--seed', type=int, default=42)
 
     parser.add_argument('--resnet', type=int, default=50, help='version of resnet to train 18/34/50/101/152')
-    parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
-    #parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
+    #parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
+    parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
     parser.add_argument('--imagesize', type=int, default=224, help='size of image')
-    parser.add_argument('--on_cluster', type=bool, default=True)
+    parser.add_argument('--on_cluster', type=bool, default=False)
     parser.add_argument('--distributed', type=bool, default=False)
 
     args = parser.parse_args()

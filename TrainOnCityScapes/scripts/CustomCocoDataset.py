@@ -6,6 +6,10 @@ import os
 import numpy as np
 import random
 import json
+from torchvision import tv_tensors
+import torchvision.transforms.v2 as v2
+import matplotlib.pyplot as plt
+from torchvision.transforms.functional import to_pil_image
 
 
 class Preparator():
@@ -63,10 +67,10 @@ class CustomCocoDataset(Dataset):
     def __getitem__(self, index):
         image_id = self.image_ids[index]
         image_info = self.image_info_cache[image_id]
-        #image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1].replace("\\", ""), 
-        #                          image_info['gt_&_city'][2], image_info["file_name"] + "_leftImg8bit.png")
-        image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1], 
+        image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1].replace("\\", ""), 
                                   image_info['gt_&_city'][2], image_info["file_name"] + "_leftImg8bit.png")
+        #image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1], 
+        #                          image_info['gt_&_city'][2], image_info["file_name"] + "_leftImg8bit.png")
         image = cv2.imread(image_path)
         annotations = self.coco.loadAnns(self.coco.getAnnIds(imgIds=image_id))
         
@@ -100,25 +104,17 @@ class CustomCocoDataset(Dataset):
             ann = random.choice(annotations)
             bbox = ann['bbox']
             category_id = ann["category_id"]
-            # Convert bbox from [x_min, y_min, width, height] to [x_min, y_min, x_max, y_max]
             x_min, y_min, width, height = bbox
-            x_max = x_min + width
-            y_max = y_min + height
-            # Crop the image using the bounding box
-            cropped_image = image[int(y_min):int(y_max), int(x_min):int(x_max)]
 
-            # Handle cases where the cropping might yield an empty image
-            if cropped_image.size == 0:
-                raise ValueError("Cropped image is empty. Please check bounding box coordinates.")
-             # Convert to a tensor and normalize the image
-            if self.transforms:
-                cropped_image_tensor = self.transforms(cropped_image)
+            cropped_image_tensor = self.transforms(image)
+            cropped_image_tensor = v2.functional.resized_crop(inpt=cropped_image_tensor, top=y_min, left=x_min, height=height, width=width, size=(224, 224), antialias=True),
 
-            # Prepare the sample to return
+            #Prepare the sample to return
             sample = {
-                'image': cropped_image_tensor,
-                'label': torch.tensor(category_id, dtype=torch.long)  # Return the category ID as label
+               'image': cropped_image_tensor[0],
+               'label': torch.tensor(category_id, dtype=torch.long)  # Return the category ID as label
             }
+
 
             return sample
 
