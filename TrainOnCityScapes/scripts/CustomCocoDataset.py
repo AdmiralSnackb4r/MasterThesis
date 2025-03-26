@@ -61,6 +61,8 @@ class CustomCocoDataset(Dataset):
         # Cache image info for faster access
         self.image_info_cache = {img["id"]: img for img in self.coco.loadImgs(self.image_ids)}
 
+        self.loading_info = {}
+
     def __len__(self):
         return len(self.image_ids)
     
@@ -101,10 +103,12 @@ class CustomCocoDataset(Dataset):
 
             return sample
         else:
-            ann = random.choice(annotations)
-            bbox = ann['bbox']
-            category_id = ann["category_id"]
-            x_min, y_min, width, height = bbox
+            width, height = 0, 0
+            while (width * height) < 10_000:
+                ann = random.choice(annotations)
+                bbox = ann['bbox']
+                category_id = ann["category_id"]
+                x_min, y_min, width, height = bbox
 
             cropped_image_tensor = self.transforms(image)
             cropped_image_tensor = v2.functional.resized_crop(inpt=cropped_image_tensor, top=y_min, left=x_min, height=height, width=width, size=(224, 224), antialias=True),

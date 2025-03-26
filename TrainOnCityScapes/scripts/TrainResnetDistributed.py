@@ -33,23 +33,23 @@ def train_model(model, train_loader, criterion, optimizer, device):
     """
     model.train()
     total_loss = 0
-    print("begin loading")
-    before_load = time.perf_counter()
+    #print("begin loading")
+    #before_load = time.perf_counter()
     for batch in train_loader:
 
 
         batch = send_batch_to_device(batch, device)
-        after_load = time.perf_counter()
+        #after_load = time.perf_counter()
 
-        print(f"Time to load a batch {after_load - before_load}")
-        #output = model(batch['image'])
+        #print(f"Time to load a batch {after_load - before_load}")
+        output = model(batch['image'])
 
-        #loss = criterion(output, batch['label'])
-        #loss.backward()
-        #total_loss += loss
+        loss = criterion(output, batch['label'])
+        loss.backward()
+        total_loss += loss
 
-        #optimizer.step()
-        #optimizer.zero_grad()
+        optimizer.step()
+        optimizer.zero_grad()
         before_load = time.perf_counter()
         
     
