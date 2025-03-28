@@ -11,6 +11,7 @@ import torchvision.transforms.v2 as v2
 from distributed_utils import *
 from torch.utils.data import DataLoader
 from CustomCocoDataset import CustomCocoDataset as coco
+from CustomCocoDataset import DebugDataset as debug
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -39,8 +40,8 @@ def train_model(model, train_loader, criterion, optimizer, device):
 
 
         batch = send_batch_to_device(batch, device)
-        #after_load = time.perf_counter()
-
+        after_load = time.perf_counter()
+        #print(batch['label'].shape)
         #print(f"Time to load a batch {after_load - before_load}")
         output = model(batch['image'])
 
@@ -50,7 +51,7 @@ def train_model(model, train_loader, criterion, optimizer, device):
 
         optimizer.step()
         optimizer.zero_grad()
-        before_load = time.perf_counter()
+        #before_load = time.perf_counter()
         
     
     result = total_loss / len(train_loader)
@@ -105,6 +106,11 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(
             model,device_ids=[local_rank])
+        
+
+    #train_dataset = debug()
+    #val_dataset = debug()
+    #test_dataset = debug()
 
     if args.on_cluster:
         
@@ -114,6 +120,7 @@ def main(args):
                             mode="object", transforms=transform)
         test_dataset = coco(args.datapath, annotation_file="/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/test_dataset.json",
                             mode="object", transforms=transform)
+    
     else:
         train_dataset = coco(args.datapath, annotation_file="TrainOnCityScapes\\CityScapes\\annotations\\train_dataset.json",
                             mode="object", transforms=transform)
@@ -132,7 +139,7 @@ def main(args):
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, sampler=test_sampler, pin_memory=True)
     else:
         train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
-                                num_workers=int(0), pin_memory=True)
+                                num_workers=int(24), pin_memory=True)
         val_loader = DataLoader(val_dataset, batch_size=args.batch_size, pin_memory=True)
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, pin_memory=True)
 
@@ -199,17 +206,17 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Distributed ResNet Training")
-    parser.add_argument('--batch_size', type=int, default=10, help='input batch size')
+    parser.add_argument('--batch_size', type=int, default=150, help='input batch size')
     parser.add_argument('--epochs', type=int, default=500, help='number of epochs to train')
     parser.add_argument('--lr', type=float, default=.002, help='learning rate')
     parser.add_argument('--seed', type=int, default=42)
 
     parser.add_argument('--resnet', type=int, default=50, help='version of resnet to train 18/34/50/101/152')
-    #parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
-    parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
+    parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
+    #parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
     parser.add_argument('--imagesize', type=int, default=224, help='size of image')
-    parser.add_argument('--on_cluster', type=bool, default=False)
-    parser.add_argument('--distributed', type=bool, default=False)
+    parser.add_argument('--on_cluster', type=bool, default=True)
+    parser.add_argument('--distributed', type=bool, default=True)
 
     args = parser.parse_args()
     torch.manual_seed(args.seed)

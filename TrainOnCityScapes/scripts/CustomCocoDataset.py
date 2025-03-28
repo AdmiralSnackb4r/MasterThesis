@@ -8,7 +8,7 @@ import random
 import json
 from torchvision import tv_tensors
 import torchvision.transforms.v2 as v2
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from torchvision.transforms.functional import to_pil_image
 
 
@@ -50,6 +50,21 @@ class Preparator():
         with open(output_file, "w") as f:
             json.dump(split_data, f, indent=None)
 
+class DebugDataset(Dataset):
+    def __init(self, mode="bboxes"):
+        self.mode = mode
+
+
+    def __len__(self):
+        return 25000
+    
+    def __getitem__(self, index):
+        #random_tensor = torch.rand(1, 3, 224, 224)
+        sample = {
+               'image': torch.rand(3, 224, 224),
+               'label': torch.tensor(2, dtype=torch.long)  # Return the category ID as label
+            }
+        return sample
 
 class CustomCocoDataset(Dataset):
     def __init__(self, root_dir, annotation_file, transforms=None, mode="bboxes"):
@@ -103,11 +118,15 @@ class CustomCocoDataset(Dataset):
 
             return sample
         else:
-            width, height = 0, 0
-            while (width * height) < 10_000:
-                ann = random.choice(annotations)
+            bboxes = torch.tensor([ann['bbox'] for ann in annotations])
+            areas = bboxes[:, 2] * bboxes[:, 3]
+            valid_indices = torch.where(areas >= 10_000)[0]
+
+            if valid_indices.numel() > 0:
+                idx = random.choice(valid_indices.tolist())
+                ann = annotations[idx]
                 bbox = ann['bbox']
-                category_id = ann["category_id"]
+                category_id = ann['category_id']
                 x_min, y_min, width, height = bbox
 
             cropped_image_tensor = self.transforms(image)
