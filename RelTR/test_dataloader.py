@@ -4,16 +4,26 @@ import torch
 import argparse
 from pathlib import Path
 import util.misc as utils
+<<<<<<< HEAD
 from datasets import build_custom_dataset
 from torch.utils.data import DataLoader
 import torchvision.transforms.v2 as v2
+=======
+from datasets import build_dataset
+from datasets import build_custom_dataset
+from torch.utils.data import DataLoader
+>>>>>>> 04ff8b044d6acc5382c0de881cd6eba87beae775
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
+<<<<<<< HEAD
     parser.add_argument('--batch_size', default=1, type=int)
+=======
+    parser.add_argument('--batch_size', default=2, type=int)
+>>>>>>> 04ff8b044d6acc5382c0de881cd6eba87beae775
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=150, type=int)
     parser.add_argument('--lr_drop', default=100, type=int)
