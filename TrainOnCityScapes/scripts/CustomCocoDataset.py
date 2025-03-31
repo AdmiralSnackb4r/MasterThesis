@@ -6,6 +6,11 @@ import os
 import numpy as np
 import random
 import json
+from torchvision import tv_tensors
+import torchvision.transforms.v2 as v2
+#import matplotlib.pyplot as plt
+from torchvision.transforms.functional import to_pil_image
+from PIL import Image
 
 
 class Preparator():
@@ -46,6 +51,21 @@ class Preparator():
         with open(output_file, "w") as f:
             json.dump(split_data, f, indent=None)
 
+class DebugDataset(Dataset):
+    def __init(self, mode="bboxes"):
+        self.mode = mode
+
+
+    def __len__(self):
+        return 25000
+    
+    def __getitem__(self, index):
+        #random_tensor = torch.rand(1, 3, 224, 224)
+        sample = {
+               'image': torch.rand(3, 224, 224),
+               'label': torch.tensor(2, dtype=torch.long)  # Return the category ID as label
+            }
+        return sample
 
 class CustomCocoDataset(Dataset):
     def __init__(self, root_dir, annotation_file, transforms=None, mode="bboxes"):
@@ -57,16 +77,18 @@ class CustomCocoDataset(Dataset):
         # Cache image info for faster access
         self.image_info_cache = {img["id"]: img for img in self.coco.loadImgs(self.image_ids)}
 
+        self.loading_info = {}
+
     def __len__(self):
         return len(self.image_ids)
     
     def __getitem__(self, index):
         image_id = self.image_ids[index]
         image_info = self.image_info_cache[image_id]
-        #image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1].replace("\\", ""), 
-        #                          image_info['gt_&_city'][2], image_info["file_name"] + "_leftImg8bit.png")
-        image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1], 
+        image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1].replace("\\", ""), 
                                   image_info['gt_&_city'][2], image_info["file_name"] + "_leftImg8bit.png")
+        #image_path = os.path.join(self.root_dir, image_info['gt_&_city'][1], 
+        #                          image_info['gt_&_city'][2], image_info["file_name"] + "_leftImg8bit.png")
         image = cv2.imread(image_path)
         annotations = self.coco.loadAnns(self.coco.getAnnIds(imgIds=image_id))
         
@@ -75,50 +97,47 @@ class CustomCocoDataset(Dataset):
             return self.__getitem__(index)
         
         if self.mode == "bboxes":
-            boxes = []
-            labels = []
-            for ann in annotations:
-                boxes.append(ann["bbox"])
-                labels.append(ann["category_id"])
+            
+            bboxes = torch.tensor([ann['bbox'] for ann in annotations], dtype=torch.float32)
+            labels = torch.tensor([ann['category_id'] for ann in annotations], dtype=torch.long)
 
-            # Convert bbox from [x, y, width, height] to [x_min, y_min, x_max, y_max]
-            boxes = np.array(boxes)
-            boxes[:, 2] = boxes[:, 0] + boxes[:, 2]  # x_max = x_min + width
-            boxes[:, 3] = boxes[:, 1] + boxes[:, 3]  # y_max = y_min + height
+            bboxes[:, 2:] += bboxes[:, :2]
 
-            sample = {
-                'image': torch.tensor(image, dtype=torch.float32).permute(2, 0, 1) / 255.0,  # Normalize the image
-                'boxes': torch.tensor(boxes, dtype=torch.float32),
-                'labels': torch.tensor(labels, dtype=torch.long)
+            image = Image.fromarray(image)
+            
+            target = {
+                'boxes' : bboxes,
+                'labels' : labels,
+                'orig_size' : torch.tensor((2048, 1024)),
+                'image_id' : torch.tensor(image_id)
             }
 
             if self.transforms:
-                sample = self.transforms(sample)
+                image, target = self.transforms(image, target)
 
-            return sample
+            return image, target
+        
         else:
-            ann = random.choice(annotations)
-            bbox = ann['bbox']
-            category_id = ann["category_id"]
-            # Convert bbox from [x_min, y_min, width, height] to [x_min, y_min, x_max, y_max]
-            x_min, y_min, width, height = bbox
-            x_max = x_min + width
-            y_max = y_min + height
-            # Crop the image using the bounding box
-            cropped_image = image[int(y_min):int(y_max), int(x_min):int(x_max)]
+            bboxes = torch.tensor([ann['bbox'] for ann in annotations])
+            areas = bboxes[:, 2] * bboxes[:, 3]
+            valid_indices = torch.where(areas >= 10_000)[0]
 
-            # Handle cases where the cropping might yield an empty image
-            if cropped_image.size == 0:
-                raise ValueError("Cropped image is empty. Please check bounding box coordinates.")
-             # Convert to a tensor and normalize the image
-            if self.transforms:
-                cropped_image_tensor = self.transforms(cropped_image)
+            if valid_indices.numel() > 0:
+                idx = random.choice(valid_indices.tolist())
+                ann = annotations[idx]
+                bbox = ann['bbox']
+                category_id = ann['category_id']
+                x_min, y_min, width, height = bbox
 
-            # Prepare the sample to return
+            cropped_image_tensor = self.transforms(image)
+            cropped_image_tensor = v2.functional.resized_crop(inpt=cropped_image_tensor, top=y_min, left=x_min, height=height, width=width, size=(224, 224), antialias=True),
+
+            #Prepare the sample to return
             sample = {
-                'image': cropped_image_tensor,
-                'label': torch.tensor(category_id, dtype=torch.long)  # Return the category ID as label
+               'image': cropped_image_tensor[0],
+               'label': torch.tensor(category_id, dtype=torch.long)  # Return the category ID as label
             }
+
 
             return sample
 

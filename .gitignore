@@ -1,2 +1,5 @@
 TrainOnCityScapes/logs/*
 TrainOnCityScapes/CityScapes/annotations
+RelTR/ckpt/*
+RelTR/datasets/annotations
+*.pyc*
