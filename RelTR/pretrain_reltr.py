@@ -16,8 +16,9 @@ from datasets import build_custom_dataset, get_coco_api_from_dataset
 from PIL import Image
 from engine import train_one_epoch, evaluate
 import torchvision.transforms.v2 as v2
-
+from distributed_utils import *
 from torch.utils.tensorboard import SummaryWriter
+from collections import OrderedDict
 
 # for output bounding box post-processing
 def box_cxcywh_to_xyxy(x):
@@ -27,13 +28,15 @@ def box_cxcywh_to_xyxy(x):
     return torch.stack(b, dim=1)
 
 def rescale_bboxes(out_bbox, size):
-    print("rescale", out_bbox.shape)
+    print0("rescale", out_bbox.shape)
     img_w, img_h = size
     b = box_cxcywh_to_xyxy(out_bbox)
     b = b * torch.tensor([img_w, img_h, img_w, img_h], dtype=torch.float32)
     return b
 
 def get_args_parser():
+
+    # Training parameters
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
@@ -97,20 +100,20 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--dataset', default='pretrain')
     parser.add_argument('--ann_path', default='./data/vg/', type=str)
-    parser.add_argument('--datapath', default='S:\\Datasets\\CityScapes\\leftImg8bit', type=str)
+    #parser.add_argument('--datapath', default='S:\\Datasets\\CityScapes\\leftImg8bit', type=str)
     parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
     parser.add_argument('--on_cluster', type=bool, default=True)
 
-    parser.add_argument('--output_dir', default='./ckpt',
+    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_1',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_1/checkpoint0038_.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
-    parser.add_argument('--num_workers', default=2, type=int)
+    parser.add_argument('--num_workers', default=42, type=int)
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
@@ -138,7 +141,7 @@ def main(args):
     transform_val = v2.Compose([
 
         v2.Compose([
-            v2.RandomResize([800], max_size=1333),
+            v2.RandomResize((800), max_size=1333),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -160,7 +163,11 @@ def main(args):
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print('number of params:', n_parameters)
+
+    if args.distributed:
+        print0('number of params:', n_parameters)
+    else:
+        print('number of params:', n_parameters)
 
     param_dicts = [
          {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
@@ -199,23 +206,45 @@ def main(args):
     output_dir = Path(args.output_dir)
 
     if args.resume:
-         checkpoint = torch.load(args.resume, map_location='cpu')
-         model.load_state_dict(checkpoint['model'], strict=True)
-         # del checkpoint['optimizer']
-         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-             optimizer.load_state_dict(checkpoint['optimizer'])
-             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-             args.start_epoch = checkpoint['epoch'] + 1
+         
+        if args.distributed:
+            print0(f"Resume training with checkpoint {args.resume}")
+        else:
+            print(f"Resume training with checkpoint {args.resume}")
+
+        checkpoint = torch.load(args.resume, map_location='cpu')
+        new_state_dict = OrderedDict()
+        state_dict = checkpoint['model']
+        for k, v in state_dict.items():
+            name = k[7:] if k.startswith("module.") else k # remove `module.`
+            new_state_dict[name] = v
+        model.load_state_dict(new_state_dict, strict=True)
+
+        if args.distributed:
+            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+            
+        if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+            args.start_epoch = checkpoint['epoch'] + 1
 
 
     if args.eval:
-        print('It is the {}th checkpoint'.format(checkpoint['epoch']))
+        if args.distributed:
+            print0('It is the {}th checkpoint'.format(checkpoint['epoch']))
+        else:
+            print('It is the {}th checkpoint'.format(checkpoint['epoch']))
+
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors, data_loader_val, base_ds, device, args)
         if args.output_dir:
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
         return
 
-    print("Start training")
+    if args.distributed:
+        print0("Start training")
+    else:
+        print("Start training")
+
     best_val_loss = float('inf')
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
@@ -223,13 +252,13 @@ def main(args):
             sampler_train.set_epoch(epoch)
         train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
         eval_stats = evaluate(model, criterion, data_loader_val, device)
+        eval_loss = sum(eval_stats['loss']) / len(eval_stats['loss'])
         lr_scheduler.step()
         if args.output_dir:
             checkpoint_paths = [output_dir / f'checkpoint_anti_crash.pth'] # anti-crash
-            # extra checkpoint before LR drop and every 100 epochs
-            if eval_stats['loss'] < best_val_loss:
-                best_val_loss = eval_stats['loss']
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}_.pth')
+            if eval_loss < best_val_loss:
+               best_val_loss = eval_loss
+               checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}_.pth')
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({
                     'model': model.state_dict(),
@@ -239,12 +268,13 @@ def main(args):
                     'args': args,
                 }, checkpoint_path)
 
-        print("Done one epoch")
-
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+    if args.distributed:
+        print0('Training time {}'.format(total_time_str))
+    else:
+        print('Training time {}'.format(total_time_str))
 
 
 

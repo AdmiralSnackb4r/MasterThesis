@@ -105,7 +105,7 @@ def evaluate(model, criterion, data_loader, device):
         if batch_idx % print_freq == 0:
             avg_loss = sum(stats['loss']) / len(stats['loss'])
             avg_class_error = sum(stats['class_error']) / len(stats['class_error'])
-            print(f"{header} [{batch_idx}/{len(data_loader)}]  Loss: {avg_loss:.4f}  Class Error: {avg_class_error:.2f}%  LR: {stats['lr'][-1]:.6f}")
+            print(f"{header} [{batch_idx}/{len(data_loader)}]  Loss: {avg_loss:.4f}  Class Error: {avg_class_error:.2f}% ")
 
     return stats
 
