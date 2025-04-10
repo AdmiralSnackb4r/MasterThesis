@@ -22,5 +22,5 @@ def get_coco_api_from_dataset(dataset):
 #    raise ValueError(f'dataset {args.dataset} not supported')
 
 
-def build_custom_dataset(args, anno_file, transform):
+def build_custom_dataset(args, anno_file, transform=None):
     return CustomCocoDataset(root_dir=args.datapath, annotation_file=anno_file, mode='bboxes', transforms=transform)

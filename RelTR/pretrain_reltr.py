@@ -10,7 +10,7 @@ import datetime
 import random
 from torch.utils.data import DataLoader, DistributedSampler
 from models import build_model, custom_build_model
-import torchvision.transforms as T
+#import torchvision.transforms as T
 from torchvision.transforms import ToPILImage
 from datasets import build_custom_dataset, get_coco_api_from_dataset
 from PIL import Image
@@ -19,6 +19,7 @@ import torchvision.transforms.v2 as v2
 from distributed_utils import *
 from torch.utils.tensorboard import SummaryWriter
 from collections import OrderedDict
+import datasets.transforms as T
 
 # for output bounding box post-processing
 def box_cxcywh_to_xyxy(x):
@@ -42,7 +43,7 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
     parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=150, type=int)
+    parser.add_argument('--epochs', default=400, type=int)
     parser.add_argument('--lr_drop', default=100, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
@@ -104,12 +105,12 @@ def get_args_parser():
     parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
     parser.add_argument('--on_cluster', type=bool, default=True)
 
-    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_1',
+    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_4',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_1/checkpoint0038_.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/p/home/jusers/kromm3/jureca/scratch/scratch/RelTR/ckpt/run_4/checkpoint0113_.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
@@ -124,6 +125,36 @@ def get_args_parser():
                         help="Return the fpn if there is the tag")
     return parser
 
+
+def make_transforms(image_set):
+
+    normalize = T.Compose([
+        T.ToTensor(),
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+
+    if image_set == 'train':
+        return T.Compose([
+            T.RandomHorizontalFlip(),
+            T.RandomSelect(
+                T.RandomResize(scales, max_size=1333),
+                T.Compose([
+                    T.RandomResize([400, 500, 600]),
+                    #T.RandomSizeCrop(384, 600), # TODO: cropping causes that some boxes are dropped then no tensor in the relation part! What should we do?
+                    T.RandomResize(scales, max_size=1333),
+                ])
+            ),
+            normalize])
+
+    if image_set == 'val':
+        return T.Compose([
+            T.RandomResize([800], max_size=1333),
+            normalize,
+        ])
+
+    raise ValueError(f'unknown {image_set}')
+    
 
 def main(args):
 
@@ -180,8 +211,8 @@ def main(args):
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
 
     if args.on_cluster:
-        dataset_train = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/train_dataset.json', transform=transform_train)
-        dataset_val = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/valid_dataset.json', transform=transform_val)
+        dataset_train = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/train_dataset.json', transform=make_transforms('train'))
+        dataset_val = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/valid_dataset.json', transform=make_transforms('val'))
     else:
         dataset_train = build_custom_dataset(args=args, anno_file='datasets\\annotations\\train_dataset.json', transform=transform_train)
         dataset_val = build_custom_dataset(args=args, anno_file='datasets\\annotations\\valid_dataset.json', transform=transform_val)
@@ -209,20 +240,19 @@ def main(args):
          
         if args.distributed:
             print0(f"Resume training with checkpoint {args.resume}")
+            checkpoint = torch.load(args.resume, map_location='cpu')
+            model.load_state_dict(checkpoint['model'], strict=True)
         else:
             print(f"Resume training with checkpoint {args.resume}")
-
-        checkpoint = torch.load(args.resume, map_location='cpu')
-        new_state_dict = OrderedDict()
-        state_dict = checkpoint['model']
-        for k, v in state_dict.items():
-            name = k[7:] if k.startswith("module.") else k # remove `module.`
-            new_state_dict[name] = v
-        model.load_state_dict(new_state_dict, strict=True)
-
-        if args.distributed:
-            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+            checkpoint = torch.load(args.resume, map_location='cpu')
+            new_state_dict = OrderedDict()
+            state_dict = checkpoint['model']
+            for k, v in state_dict.items():
+                name = k[7:] if k.startswith("module.") else k # remove `module.`
+                new_state_dict[name] = v
+            model.load_state_dict(new_state_dict, strict=True)
             
+
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
@@ -259,6 +289,8 @@ def main(args):
             if eval_loss < best_val_loss:
                best_val_loss = eval_loss
                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}_.pth')
+            if (epoch + 1) % 5 == 0:
+                checkpoint_paths.append(output_dir / f'checkpoint_bup_{epoch:04}_.pth')
             for checkpoint_path in checkpoint_paths:
                 utils.save_on_master({
                     'model': model.state_dict(),

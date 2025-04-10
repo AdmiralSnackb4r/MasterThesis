@@ -30,21 +30,27 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     stats = {
         'loss': [],
         'class_error': [],
+        'loss_bbox' : [],
         'lr': []
     }
     
     for batch_idx, (samples, targets) in enumerate(data_loader):
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-
         outputs = model(samples)
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
-        # Reduce losses over all GPUs (if using distributed training)
-        loss_dict_reduced = {k: v.item() for k, v in loss_dict.items()}
-        loss_value = losses.item()
+        # reduce losses over all GPUs for logging purposes
+        loss_dict_reduced = utils.reduce_dict(loss_dict)
+        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
+                                      for k, v in loss_dict_reduced.items()}
+        loss_dict_reduced_scaled = {k: v * weight_dict[k]
+                                    for k, v in loss_dict_reduced.items() if k in weight_dict}
+        losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
+
+        loss_value = losses_reduced_scaled.item()
 
         if not math.isfinite(loss_value):
             print(f"Loss is {loss_value}, stopping training")
@@ -60,12 +66,14 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         # Collect stats
         stats['loss'].append(loss_value)
         stats['class_error'].append(loss_dict_reduced.get('class_error', 0))
+        stats['loss_bbox'].append(loss_dict_reduced.get('loss_bbox', 0))
         stats['lr'].append(optimizer.param_groups[0]['lr'])
 
         if batch_idx % print_freq == 0:
             avg_loss = sum(stats['loss']) / len(stats['loss'])
             avg_class_error = sum(stats['class_error']) / len(stats['class_error'])
-            print(f"{header} [{batch_idx}/{len(data_loader)}]  Loss: {avg_loss:.4f}  Class Error: {avg_class_error:.2f}% ")
+            avg_bbox_loss = sum(stats['loss_bbox']) / len(stats['loss_bbox'])
+            print(f"{header} [{batch_idx}/{len(data_loader)}]  Loss: {avg_loss:.4f}  Class Error: {avg_class_error:.2f}%  Bbox Loss: {avg_bbox_loss:.2f}% ")
 
     return stats
 

@@ -101,7 +101,11 @@ class CustomCocoDataset(Dataset):
             bboxes = torch.tensor([ann['bbox'] for ann in annotations], dtype=torch.float32)
             labels = torch.tensor([ann['category_id'] for ann in annotations], dtype=torch.long)
 
-            bboxes[:, 2:] += bboxes[:, :2]
+            bboxes[:, 2] = bboxes[:, 0] + bboxes[:, 2]
+            bboxes[:, 3] = bboxes[:, 1] + bboxes[:, 3]
+
+            #bboxes[:, 0] = bboxes[:, 0] + bboxes[:, 2] / 2  # cx = x + w/2
+            #bboxes[:, 1] = bboxes[:, 1] + bboxes[:, 3] / 2  # cy = y + h/2
 
             image = Image.fromarray(image)
             

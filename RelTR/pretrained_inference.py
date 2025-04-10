@@ -15,7 +15,7 @@ def get_args_parser():
     parser.add_argument('--dataset', default='vg')
 
     # image path
-    parser.add_argument('--img_path', type=str, default='/home/o-ekromm/Workspace/FP/CityScapes/leftImg8bit_trainvaltest/leftImg8bit/test/munich/munich_000195_000019_leftImg8bit.png',
+    parser.add_argument('--img_path', type=str, default='/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit/test/munich/munich_000195_000019_leftImg8bit.png',
                         help="Path of the test image")
 
     # * Backbone
@@ -51,7 +51,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='/home/o-ekromm/Workspace/FP/RelTR/RelTR/ckpt/checkpoint0199_.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/p/home/jusers/kromm3/jureca/master/scratch/RelTR/ckpt/run_1/checkpoint0014_.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -153,7 +153,7 @@ def main(args):
     keep = torch.tensor(probas.max(-1).values > 0.85)
     # convert boxes from [0; 1] to image scales
     bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], im.size)
-
+    print(bboxes_scaled)
     #topk = 10
     #keep_queries = torch.nonzero(keep, as_tuple=True)[0]
     #indices = torch.argsort(-probas[keep_queries].max(-1)[0])[:topk]
@@ -176,6 +176,7 @@ def main(args):
     with torch.no_grad():
         # propagate through the model
         outputs = model(img)
+        #print(outputs)
 
         for hook in hooks:
             hook.remove()
@@ -189,24 +190,24 @@ def main(args):
         h, w = conv_features['0'].tensors.shape[-2:]
         im_w, im_h = im.size
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 10))  # Single subplot
-        ax.imshow(im)
+        ##fig, ax = plt.subplots(1, 1, figsize=(10, 10))  # Single subplot
+        #ax.imshow(im)
 
-        for i, (bxmin, bymin, bxmax, bymax) in enumerate(bboxes_scaled):
-            class_index = probas[keep][i].argmax()
-            for key, value in label_id.items(): # get the class name from the class index
-                if value == class_index:
-                    class_name = key
+        #for i, (bxmin, bymin, bxmax, bymax) in enumerate(bboxes_scaled):
+        #     class_index = probas[keep][i].argmax()
+        #     for key, value in label_id.items(): # get the class name from the class index
+        #         if value == class_index:
+        #             class_name = key
 
 
-            rect = plt.Rectangle((bxmin, bymin), bxmax - bxmin, bymax - bymin,
-                                fill=False, color='blue', linewidth=2.5)
-            ax.add_patch(rect)
-            # Add text label for class
-            ax.text(bxmin, bymin, class_name, fontsize=10, color='red') # add the class name to the bounding box
+        #     rect = plt.Rectangle((bxmin, bymin), bxmax - bxmin, bymax - bymin,
+        #                         fill=False, color='blue', linewidth=2.5)
+        #     ax.add_patch(rect)
+        #     # Add text label for class
+        #     ax.text(bxmin, bymin, class_name, fontsize=10, color='red') # add the class name to the bounding box
 
-        plt.tight_layout()
-        plt.show()
+        # plt.tight_layout()
+        # plt.show()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('RelTR inference', parents=[get_args_parser()])
