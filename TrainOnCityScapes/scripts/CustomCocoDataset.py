@@ -10,7 +10,6 @@ from torchvision import tv_tensors
 import torchvision.transforms.v2 as v2
 #import matplotlib.pyplot as plt
 from torchvision.transforms.functional import to_pil_image
-from PIL import Image
 
 
 class Preparator():
@@ -97,26 +96,27 @@ class CustomCocoDataset(Dataset):
             return self.__getitem__(index)
         
         if self.mode == "bboxes":
-            
-            bboxes = torch.tensor([ann['bbox'] for ann in annotations], dtype=torch.float32)
-            labels = torch.tensor([ann['category_id'] for ann in annotations], dtype=torch.long)
+            boxes = []
+            labels = []
+            for ann in annotations:
+                boxes.append(ann["bbox"])
+                labels.append(ann["category_id"])
 
-            bboxes[:, 2:] += bboxes[:, :2]
+            # Convert bbox from [x, y, width, height] to [x_min, y_min, x_max, y_max]
+            boxes = np.array(boxes)
+            boxes[:, 2] = boxes[:, 0] + boxes[:, 2]  # x_max = x_min + width
+            boxes[:, 3] = boxes[:, 1] + boxes[:, 3]  # y_max = y_min + height
 
-            image = Image.fromarray(image)
-            
-            target = {
-                'boxes' : bboxes,
-                'labels' : labels,
-                'orig_size' : torch.tensor((2048, 1024)),
-                'image_id' : torch.tensor(image_id)
+            sample = {
+                'image': torch.tensor(image, dtype=torch.float32).permute(2, 0, 1) / 255.0,  # Normalize the image
+                'boxes': torch.tensor(boxes, dtype=torch.float32),
+                'labels': torch.tensor(labels, dtype=torch.long)
             }
 
             if self.transforms:
-                image, target = self.transforms(image, target)
+                sample = self.transforms(sample)
 
-            return image, target
-        
+            return sample
         else:
             bboxes = torch.tensor([ann['bbox'] for ann in annotations])
             areas = bboxes[:, 2] * bboxes[:, 3]
