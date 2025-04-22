@@ -40,7 +40,7 @@ def train_model(model, train_loader, criterion, optimizer, device):
 
 
         batch = send_batch_to_device(batch, device)
-        after_load = time.perf_counter()
+        #after_load = time.perf_counter()
         #print(batch['label'].shape)
         #print(f"Time to load a batch {after_load - before_load}")
         output = model(batch['image'])
@@ -206,9 +206,9 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Distributed ResNet Training")
-    parser.add_argument('--batch_size', type=int, default=150, help='input batch size')
+    parser.add_argument('--batch_size', type=int, default=450, help='input batch size')
     parser.add_argument('--epochs', type=int, default=500, help='number of epochs to train')
-    parser.add_argument('--lr', type=float, default=.002, help='learning rate')
+    parser.add_argument('--lr', type=float, default=.01, help='learning rate')
     parser.add_argument('--seed', type=int, default=42)
 
     parser.add_argument('--resnet', type=int, default=50, help='version of resnet to train 18/34/50/101/152')

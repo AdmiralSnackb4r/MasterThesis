@@ -43,8 +43,8 @@ def get_args_parser():
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
     parser.add_argument('--batch_size', default=2, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=400, type=int)
-    parser.add_argument('--lr_drop', default=100, type=int)
+    parser.add_argument('--epochs', default=500, type=int)
+    parser.add_argument('--lr_drop', default=400, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
 
@@ -110,7 +110,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='/p/home/jusers/kromm3/jureca/scratch/scratch/RelTR/ckpt/run_4/checkpoint0113_.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
@@ -158,28 +158,6 @@ def make_transforms(image_set):
 
 def main(args):
 
-    scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
-
-    transform_train = v2.Compose([
-
-                v2.RandomHorizontalFlip(p=0.5),
-                v2.RandomResize(random.choice(scales), max_size=1333),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-
-    transform_val = v2.Compose([
-
-        v2.Compose([
-            v2.RandomResize((800), max_size=1333),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])
-    ])
-
-
     utils.init_distributed_mode(args)
     device = torch.device(args.device)
     # fix the seed for reproducibility
@@ -187,6 +165,8 @@ def main(args):
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
+
+    writer = SummaryWriter(log_dir='/p/project/hai_1008/kromm3/RelTR/logs/run_5')
 
     model, criterion, postprocessors = custom_build_model(args)
     model.to(device)
@@ -214,8 +194,8 @@ def main(args):
         dataset_train = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/train_dataset.json', transform=make_transforms('train'))
         dataset_val = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/valid_dataset.json', transform=make_transforms('val'))
     else:
-        dataset_train = build_custom_dataset(args=args, anno_file='datasets\\annotations\\train_dataset.json', transform=transform_train)
-        dataset_val = build_custom_dataset(args=args, anno_file='datasets\\annotations\\valid_dataset.json', transform=transform_val)
+        dataset_train = build_custom_dataset(args=args, anno_file='datasets\\annotations\\train_dataset.json', transform=make_transforms('train'))
+        dataset_val = build_custom_dataset(args=args, anno_file='datasets\\annotations\\valid_dataset.json', transform=make_transforms('val'))
 
 
     if args.distributed:
@@ -282,6 +262,15 @@ def main(args):
             sampler_train.set_epoch(epoch)
         train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
         eval_stats = evaluate(model, criterion, data_loader_val, device)
+
+        writer.add_scalar('Train/Loss', sum(train_stats['loss']) / len(train_stats['loss']))
+        writer.add_scalar('Train/Class Error', sum(train_stats['class_error']) / len(train_stats['class_error']))
+        writer.add_scalar('Train/BBox Error', sum(train_stats['loss_bbox']) / len(train_stats['loss_bbox']))
+
+        writer.add_scalar('Val/Loss', sum(eval_stats['loss']) / len(eval_stats['loss']))
+        writer.add_scalar('Val/Class Error', sum(eval_stats['class_error']) / len(eval_stats['class_error']))
+        writer.add_scalar('Val/BBox Error', sum(eval_stats['loss_bbox']) / len(eval_stats['loss_bbox']))
+
         eval_loss = sum(eval_stats['loss']) / len(eval_stats['loss'])
         lr_scheduler.step()
         if args.output_dir:

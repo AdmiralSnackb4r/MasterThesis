@@ -89,7 +89,8 @@ def evaluate(model, criterion, data_loader, device):
     
     stats = {
         'loss': [],
-        'class_error': []
+        'class_error': [],
+        'loss_bbox' : []
     }
 
     for batch_idx, (samples, targets) in enumerate(data_loader):
@@ -109,6 +110,7 @@ def evaluate(model, criterion, data_loader, device):
         # Collect stats
         stats['loss'].append(loss_value)
         stats['class_error'].append(loss_dict_reduced.get('class_error', 0))
+        stats['loss_bbox'].append(loss_dict_reduced.get('loss_bbox', 0))
 
         if batch_idx % print_freq == 0:
             avg_loss = sum(stats['loss']) / len(stats['loss'])
