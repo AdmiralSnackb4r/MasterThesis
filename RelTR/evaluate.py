@@ -20,7 +20,8 @@ def get_args_parser():
     parser.add_argument('--dataset', default='vg')
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--num_workers', default=2, type=int)
-    parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
+    #parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
+    parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
 
     # image path
     parser.add_argument('--img_path', type=str, default='demo/vg1.jpg',
@@ -60,7 +61,8 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--resume', default='ckpt/', help='resume from checkpoint')
-    parser.add_argument('--eval', default='/p/scratch/hai_1008/kromm3/RelTR/eval/run_4/eval.json', help='place to store evaluation')
+    #parser.add_argument('--eval', default='/p/scratch/hai_1008/kromm3/RelTR/eval/run_4/eval.json', help='place to store evaluation')
+    parser.add_argument('--eval', default='RelTR\\eval\\run_1\\eval.json', help='place to store evaluation')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -87,7 +89,7 @@ def make_transforms(image_set):
 
     normalize = T.Compose([
         T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        #T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
 
@@ -106,7 +108,7 @@ def make_transforms(image_set):
 
     if image_set == 'val':
         return T.Compose([
-            T.RandomResize([800], max_size=None),
+            #T.RandomResize([800], max_size=None),
             normalize,
         ])
 
@@ -140,24 +142,38 @@ def compute_iou(box1, box2):
     union_area = box1_area + box2_area - inter_area
     return inter_area / (union_area + 1e-6)
 
-def match_predictions(preds, targets, iou_threshold=0.5):
-    matched = set()
+def match_predictions(preds, targets, iou_threshold=0.1, confidence=0.3):
+    matched_targets = set()
+    matched_preds = set()
     tp = 0
-    for pred_idx, pred_box in enumerate(preds['pred_boxes']):
-        pred_label = preds['labels'][pred_idx]
-        for tgt_idx, tgt_box in enumerate(targets['boxes']):
-            if tgt_idx in matched:
+
+    probas = preds['pred_logits'].softmax(-1)[0, :, :-1]
+    scores, labels = probas.max(-1)
+
+    keep = scores > confidence
+    filtered_boxes = preds['pred_boxes'][0][keep]
+    filtered_labels = labels[keep]
+
+    filtered_boxes = rescale_bboxes(filtered_boxes, targets[0]['orig_size'])
+
+    for pred_idx, (pred_box, pred_label) in enumerate(zip(filtered_boxes, filtered_labels)):
+        if pred_idx in matched_preds:
+            continue
+        for tgt_idx, tgt_box in enumerate(targets[0]['boxes']):
+            if tgt_idx in matched_targets:
                 continue
-            if pred_label != targets['labels'][tgt_idx]:
+            if pred_label != targets[0]['labels'][tgt_idx]:
                 continue
-            iou = compute_iou(pred_box.tolist(), tgt_box.tolist())
+            iou = compute_iou(pred_box, tgt_box)
             if iou > iou_threshold:
                 tp += 1
-                matched.add(tgt_idx)
-                break
-    return tp, len(preds['pred_boxes']), len(targets['boxes'])
+                matched_preds.add(pred_idx)
+                matched_targets.add(tgt_idx)
+                break  # Stop after first match
 
-def evaluate_model(predictions, ground_truths, confidence_threshold=0.95, iou_threshold=0.5):
+    return tp, len(filtered_boxes), len(targets[0]['boxes'])
+
+def evaluate_model(predictions, ground_truths, confidence_threshold=0.95, iou_threshold=0.8):
     true_positives = 0
     false_positives = 0
     false_negatives = 0
@@ -203,6 +219,7 @@ def evaluate_model(predictions, ground_truths, confidence_threshold=0.95, iou_th
                 if gt_idx in matched_gts:
                     continue
                 iou = compute_iou(pred_box, gt_box)
+                print(iou)
                 if iou > best_iou:
                     best_iou = iou
                     best_gt_idx = gt_idx
@@ -242,15 +259,18 @@ def evaluate(model, dataloader, device='cuda'):
         samples = samples.to(device)
         with torch.no_grad():
             outputs = model(samples)
-        outputs = [{k: v.cpu() for k, v in o.items()} for o in outputs]
-        targets = [{k: v for k, v in t.items()} for t in targets]
 
-        for pred, gt in zip (outputs, targets):
-            tp, num_preds, num_gts = match_predictions(pred, gt)
-            total_tp += tp
-            total_fp += (num_preds - tp)
-            total_fn += (num_gts - tp)
-        break
+        #outputs = [{k: v.cpu() for k, v in o.items()} for o in outputs]
+        #targets = [{k: v for k, v in t.items()} for t in targets]
+
+        #for pred, gt in zip (outputs, targets):
+        tp, num_preds, num_gts = match_predictions(outputs, targets)
+        total_tp += tp
+        total_fp += (num_preds - tp)
+        total_fn += (num_gts - tp)
+
+        print(total_tp, total_fp, total_fn)
+        #break
 
     precision = total_tp / (total_tp + total_fp + 1e-6)
     recall = total_tp / (total_tp + total_fn + 1e-6)
@@ -279,8 +299,9 @@ def main(args):
     #utils.init_distributed_mode(args)
     device = torch.device(args.device)
 
-    dataset_test = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/train_dataset.json', transform=make_transforms('val'))
-    sampler_test = torch.utils.data.SequentialSampler(dataset_test)
+    #dataset_test = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/train_dataset.json', transform=make_transforms('val'))
+    dataset_test = build_custom_dataset(args=args, anno_file='TrainOnCityScapes\\CityScapes\\annotations\\with_filter\\test_dataset.json', transform=make_transforms('val'))
+    sampler_test = torch.utils.data.RandomSampler(dataset_test)
 
     data_loader_val = DataLoader(dataset_test, args.batch_size, sampler=sampler_test,
                                   drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
@@ -288,7 +309,8 @@ def main(args):
 
     model, criterion, _ = custom_build_model(args)
     model.to(device)
-    checkpoint = torch.load('/p/home/jusers/kromm3/jureca/master/scratch/RelTR/ckpt/run_4/checkpoint0114_.pth', map_location='cpu')
+    #checkpoint = torch.load('/p/home/jusers/kromm3/jureca/master/scratch/RelTR/ckpt/run_4/checkpoint0114_.pth', map_location='cpu')
+    checkpoint = torch.load('RelTR\\ckpt\\run_1\\checkpoint0414_.pth', map_location='cpu', weights_only=False)
     new_state_dict = OrderedDict()
     state_dict = checkpoint['model']
     for k, v in state_dict.items():

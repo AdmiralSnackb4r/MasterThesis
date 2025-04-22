@@ -59,7 +59,7 @@ class RelTR(nn.Module):
     
 
 def custom_build(args):
-    num_classes = 27
+    num_classes = 16
     num_rel_classes = 51
 
     device = torch.device(args.device)

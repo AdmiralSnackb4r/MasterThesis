@@ -4,26 +4,16 @@ import torch
 import argparse
 from pathlib import Path
 import util.misc as utils
-<<<<<<< HEAD
-from datasets import build_custom_dataset
+from datasets import build_custom_dataset, build_carla_dataset
 from torch.utils.data import DataLoader
 import torchvision.transforms.v2 as v2
-=======
-from datasets import build_dataset
-from datasets import build_custom_dataset
-from torch.utils.data import DataLoader
->>>>>>> 04ff8b044d6acc5382c0de881cd6eba87beae775
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
-<<<<<<< HEAD
     parser.add_argument('--batch_size', default=1, type=int)
-=======
-    parser.add_argument('--batch_size', default=2, type=int)
->>>>>>> 04ff8b044d6acc5382c0de881cd6eba87beae775
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=150, type=int)
     parser.add_argument('--lr_drop', default=100, type=int)
@@ -83,7 +73,7 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--dataset', default='vg')
     parser.add_argument('--ann_path', default='./data/vg/', type=str)
-    parser.add_argument('--datapath', default='S:\\Datasets\\CityScapes\\leftImg8bit', type=str)
+    parser.add_argument('--datapath', default='F:\\scenario_runner-0.9.15', type=str)
 
 
     parser.add_argument('--output_dir', default='',
@@ -121,7 +111,7 @@ def main(args):
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)
-    test = build_custom_dataset(args=args, anno_file='datasets\\annotations\\train_dataset.json', transform=transform)
+    test = build_carla_dataset(args=args, anno_file='datasets\\annotations\\Carla\\test_dataset_pre.json', transform=transform)
     sampler = torch.utils.data.RandomSampler(test)
 
     batch_sampler = torch.utils.data.BatchSampler(
@@ -131,10 +121,13 @@ def main(args):
     dataloader = DataLoader(test, batch_sampler=batch_sampler,
                             collate_fn=utils.collate_fn, num_workers=args.num_workers)
     
+    print(test.__getitem__(1500))
+    
     for i in range(len(test)):
         print(i)
         batch = next(iter(dataloader))
         print(batch)
+        break
 
     #print(next(iter(dataloader)))
     

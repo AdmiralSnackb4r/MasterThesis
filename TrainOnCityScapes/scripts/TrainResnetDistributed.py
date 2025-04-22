@@ -212,8 +212,8 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=42)
 
     parser.add_argument('--resnet', type=int, default=50, help='version of resnet to train 18/34/50/101/152')
-    parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
-    #parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
+    #parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
+    parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
     parser.add_argument('--imagesize', type=int, default=224, help='size of image')
     parser.add_argument('--on_cluster', type=bool, default=True)
     parser.add_argument('--distributed', type=bool, default=True)

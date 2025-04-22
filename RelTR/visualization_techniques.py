@@ -6,6 +6,8 @@ from PIL import Image
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import torchvision.utils as vutils
+import torchvision.transforms.functional as TF
+
 
 
 def plot_heatmap(data, title="Heatmap", cmap="viridis", colorbar=True):
@@ -87,3 +89,93 @@ def attention_rollout(attentions: torch.tensor):
     print(rollout.shape)
 
     return rollout
+
+def visualize_attention_map(image_tensor, attn_weights, query_idx=0, head_idx=0):
+    """
+    image_tensor: [3, H, W] – the original image fed into the model
+    attn_weights: [num_queries, num_heads, num_keys] or [batch, ...]
+    """
+    # Assume [num_queries, num_heads, num_keys]
+    if attn_weights.dim() == 4:
+        attn_weights = attn_weights[0]  # drop batch
+
+    num_queries, num_heads, num_keys = attn_weights.shape
+    h, w = image_tensor.shape[1:]
+
+    # DETR usually uses 32x downsampling: divide spatial dims by 32
+    grid_size = (h // 32, w // 32)
+
+    weights = attn_weights[query_idx, head_idx]  # [num_keys]
+    weights = weights.view(grid_size).detach().cpu().numpy()
+
+    # Normalize and upscale
+    weights = (weights - weights.min()) / (weights.max() - weights.min() + 1e-6)
+    weights = torch.tensor(weights).unsqueeze(0).unsqueeze(0)  # [1,1,H,W]
+    weights = torch.nn.functional.interpolate(weights, size=(h, w), mode='bilinear', align_corners=False)[0,0]
+
+    # Plot
+    fig, ax = plt.subplots()
+    img = TF.to_pil_image(image_tensor.cpu())
+    ax.imshow(img)
+    ax.imshow(weights, cmap='jet', alpha=0.5)
+    ax.set_title(f"Attention Map: Query {query_idx}, Head {head_idx}")
+    ax.axis('off')
+    plt.show()
+
+def visualize_multiple_attention_maps(image, attn_weights, queries=(0, 1, 2), heads=(0, 1), title_prefix="", image_size=(0, 0)):
+    """
+    image_tensor: [3, H, W]
+    attn_weights: [num_queries, num_heads, num_keys] or [batch_size, num_queries, num_heads, num_keys]
+    queries: tuple of query indices to visualize
+    heads: tuple of head indices to visualize
+    """
+    if attn_weights.dim() == 4:
+        attn_weights = attn_weights[0]  # Remove batch dimension
+
+    print(attn_weights.shape)
+
+    num_queries, num_heads, num_keys = attn_weights.shape
+    h, w = image_size
+    
+    num_keys = attn_weights.shape[-1]
+    feat_h = int(h / 32)
+    feat_w = int(w / 32)
+
+    # Sometimes feature maps are not exactly h/32 x w/32
+    # So fall back to sqrt if needed
+    if feat_h * feat_w != num_keys:
+        sqrt_keys = int(num_keys**0.5)
+        if sqrt_keys * sqrt_keys == num_keys:
+            feat_h = feat_w = sqrt_keys
+        else:
+            raise ValueError(f"Can't infer grid size from {num_keys} tokens")
+
+    grid_size = (feat_h, feat_w)
+
+    fig, axes = plt.subplots(len(queries), len(heads), figsize=(4 * len(heads), 4 * len(queries)))
+    if len(queries) == 1:
+        axes = [axes]
+    if len(heads) == 1:
+        axes = [[ax] for ax in axes]
+
+    #img = TF.to_pil_image(image_tensor.cpu())
+
+    for i, q_idx in enumerate(queries):
+        for j, h_idx in enumerate(heads):
+            ax = axes[i][j]
+            weights = attn_weights[q_idx, h_idx]  # [num_keys]
+            weights = weights.view(grid_size).detach().cpu()
+            weights = (weights - weights.min()) / (weights.max() - weights.min() + 1e-6)
+
+            # Upscale to match image size
+            weights = torch.nn.functional.interpolate(
+                weights.unsqueeze(0).unsqueeze(0), size=(h, w), mode='bilinear', align_corners=False
+            )[0, 0]
+
+            ax.imshow(image)
+            ax.imshow(weights, cmap='jet', alpha=0.5)
+            ax.set_title(f"{title_prefix}Q{q_idx} H{h_idx}")
+            ax.axis('off')
+
+    plt.tight_layout()
+    plt.show()

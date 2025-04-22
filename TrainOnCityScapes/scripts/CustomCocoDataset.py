@@ -13,41 +13,102 @@ from torchvision.transforms.functional import to_pil_image
 from PIL import Image
 
 
+
+
 class Preparator():
-    def __init__(self, root_dir, annotation_file):
+
+
+    def __init__(self, root_dir, annotation_file, exclude_category_ids=None):
         self.root_dir = root_dir
         self.coco = COCO(annotation_file)
         self.image_ids = list(self.coco.imgs.keys())
         self.dataset_size = len(self.image_ids)
+        self.exclude_category_ids = set(exclude_category_ids or [])
 
-    def split_train_val_test(self, split):
-        # Compute the number of samples for each split
-        number_train_data = int(self.dataset_size * split[0])
-        number_validation_data = int(self.dataset_size * split[1])
+        # self.image_ids = self._filter_images()
+        # self.dataset_size = len(self.image_ids)
+
+    # def _filter_images(self):
+    #     valid_image_ids = []
+    #     for img_id in self.coco.imgs:
+    #         ann_ids = self.coco.getAnnIds(imgIds=img_id)
+    #         anns = self.coco.loadAnns(ann_ids)
+
+    #         if all(ann['category_id'] not in self.exclude_category_ids for ann in anns):
+    #             valid_image_ids.append(img_id)
+    #     return valid_image_ids
+
+    def split_train_val_test(self):
         
-        # Randomly select images for the training set
-        draws_train = random.sample(self.image_ids, number_train_data)
-        
-        # Remaining images after selecting training set
-        remaining_images = [value for value in self.image_ids if value not in draws_train]
-        
-        # Randomly select images for the validation set from the remaining images
-        draws_validation = random.sample(remaining_images, number_validation_data)
-        
-        # The remaining images after selecting validation set will be the test set
-        draws_test = [value for value in remaining_images if value not in draws_validation]
-        
-        return draws_train, draws_validation, draws_test
+        train_ids, val_ids, test_ids = [], [], []
+
+        for img_id in self.image_ids:
+            filename = self.coco.imgs[img_id]['file_name'].lower()
+            if "weimar" in filename:
+                val_ids.append(img_id)
+            elif "zurich" in filename:
+                test_ids.append(img_id)
+            else:
+                train_ids.append(img_id)
+
+        return train_ids, val_ids, test_ids
     
     def create_split_annotations(self, split_ids, output_file):
-        images = [self.coco.imgs[img_id] for img_id in split_ids]
-        annotations = [ann for ann in self.coco.anns.values() if ann['image_id'] in split_ids]
-        categories = list(self.coco.cats.values())
-        split_data = {
-            "images" : images,
-            "annotations" : annotations,
-            "categories" : categories
+
+        label_id = {
+        "road" : 0,
+        "side walk" : 1,
+        "parking" : 2,
+        "bridge" : 3,
+        "pole" : 4,
+        "traffic light" : 5,
+        "traffic sign" : 6,
+        "rider" : 7,
+        "person" : 7,
+        "car" : 8,
+        "truck" : 9,
+        "bus" : 10,
+        "train" : 11,
+        "motorcycle" : 12,
+        "bicycle" : 13,
+        "ground" : 14
         }
+
+
+         # Invert label_id mapping for name lookup
+        name_to_new_id = label_id
+        new_id_to_name = {v: k for k, v in label_id.items()}
+
+        # Get annotations and filter out excluded categories
+        annotations = [
+            ann for ann in self.coco.anns.values()
+            if ann['image_id'] in split_ids and ann['category_id'] not in self.exclude_category_ids
+        ]
+
+        # Remap category IDs in annotations
+        for ann in annotations:
+            original_cat_id = ann['category_id']
+            category_name = self.coco.cats[original_cat_id]['name']
+            ann['category_id'] = name_to_new_id[category_name]
+
+        # Collect only used category names
+        used_category_names = set(self.coco.cats[ann['category_id']]['name'] for ann in annotations)
+
+        # Build new categories list with updated IDs
+        categories = [
+            {"id": new_id, "name": name}
+            for name, new_id in label_id.items()
+            if name in used_category_names
+        ]
+
+        images = [self.coco.imgs[img_id] for img_id in split_ids]
+
+        split_data = {
+            "images": images,
+            "annotations": annotations,
+            "categories": categories
+        }
+
         with open(output_file, "w") as f:
             json.dump(split_data, f, indent=None)
 

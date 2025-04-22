@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import torch
 import torchvision.transforms as T
 from models import custom_build_model
+from visualization_techniques import visualize_attention_map, visualize_multiple_attention_maps
 
 
 def get_args_parser():
@@ -15,8 +16,12 @@ def get_args_parser():
     parser.add_argument('--dataset', default='vg')
 
     # image path
-    parser.add_argument('--img_path', type=str, default='/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit/test/munich/munich_000195_000019_leftImg8bit.png',
+    # parser.add_argument('--img_path', type=str, default='/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit/test/munich/munich_000195_000019_leftImg8bit.png',
+    #                     help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\hamburg\\hamburg_000000_000629_leftImg8bit.png',
                         help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\_out\\DynamicObjectCrossing_4\\rgb\\filtered\\00005255.png',
+    #                    help="Path of the test image")
 
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -51,7 +56,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='/p/home/jusers/kromm3/jureca/master/scratch/RelTR/ckpt/run_1/checkpoint0014_.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='RelTR\\ckpt\\run_1\\checkpoint0414_.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -126,7 +131,7 @@ def main(args):
 
     
     model, _, _ = custom_build_model(args)
-    ckpt = torch.load(args.resume, map_location='cpu')
+    ckpt = torch.load(args.resume, weights_only=False, map_location='cpu')
     state_dict = ckpt['model']
 
     from collections import OrderedDict
@@ -139,7 +144,7 @@ def main(args):
     print(f"Model loaded successfully from {args.resume}")
 
     img_path = args.img_path
-    im = Image.open(img_path)
+    im = Image.open(img_path).convert('RGB')
 
     # mean-std normalize the input image (batch-size: 1)
     img = transform(im).unsqueeze(0)
@@ -153,61 +158,89 @@ def main(args):
     keep = torch.tensor(probas.max(-1).values > 0.85)
     # convert boxes from [0; 1] to image scales
     bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], im.size)
-    print(bboxes_scaled)
-    #topk = 10
-    #keep_queries = torch.nonzero(keep, as_tuple=True)[0]
-    #indices = torch.argsort(-probas[keep_queries].max(-1)[0])[:topk]
-    #keep_queries = keep_queries[indices]
+    #print(bboxes_scaled)
+    topk = 10
+    keep_queries = torch.nonzero(keep, as_tuple=True)[0]
+    indices = torch.argsort(-probas[keep_queries].max(-1)[0])[:topk]
+    keep_queries = keep_queries[indices]
 
     # use lists to store the outputs via up-values
-    conv_features, dec_attn_weights_sub, dec_attn_weights_obj = [], [], []
+    conv_features, enc_attn_weights, dec_attn_weights_entity, dec_attn_weights_sub, dec_attn_weights_obj = [], [], [], [], []
 
     hooks = [
-         model.backbone[-2].register_forward_hook(
-             lambda self, input, output: conv_features.append(output)
-         ),
-    #     model.transformer.decoder.layers[-1].cross_attn_sub.register_forward_hook(
-    #         lambda self, input, output: dec_attn_weights_sub.append(output[1])
-    #     ),
-    #     model.transformer.decoder.layers[-1].cross_attn_obj.register_forward_hook(
-    #         lambda self, input, output: dec_attn_weights_obj.append(output[1])
-    #     )
+        model.backbone[-2].register_forward_hook(
+            lambda self, input, output: conv_features.append(output)
+        ),
+        model.transformer.encoder.layers[-1].self_attn.register_forward_hook(
+            lambda self, input, output: enc_attn_weights.append(output[1])
+        ),
+        model.transformer.decoder.layers[-1].cross_attn_entity.register_forward_hook(
+            lambda self, input, output: dec_attn_weights_entity.append(output[1])
+        ),
+        # model.transformer.decoder.layers[-1].cross_attn_sub.register_forward_hook(
+        #     lambda self, input, output: dec_attn_weights_sub.append(output[1])
+        # ),
+        # model.transformer.decoder.layers[-1].cross_attn_obj.register_forward_hook(
+        #     lambda self, input, output: dec_attn_weights_obj.append(output[1])
+        # )
     ]
     with torch.no_grad():
         # propagate through the model
         outputs = model(img)
-        #print(outputs)
 
         for hook in hooks:
             hook.remove()
 
+        #print(conv_features)
+
+        #for i in conv_features:
+        #    print(i)
+
+
+        enc_attn_weights_list = enc_attn_weights
+        dec_attn_weights_entity_list = dec_attn_weights_entity
+        dec_attn_weights_sub_list = dec_attn_weights_sub
+        dec_attn_weights_obj_list = dec_attn_weights_obj
+
+
         # don't need the list anymore
         conv_features = conv_features[0]
-        # dec_attn_weights_sub = dec_attn_weights_sub[0]
-        # dec_attn_weights_obj = dec_attn_weights_obj[0]
+        enc_attn_weights = enc_attn_weights[0]
+        dec_attn_weights_entity = dec_attn_weights_entity[0]
+        #dec_attn_weights_sub = dec_attn_weights_sub[0]
+        #dec_attn_weights_obj = dec_attn_weights_obj[0]
 
         # get the feature map shape
         h, w = conv_features['0'].tensors.shape[-2:]
         im_w, im_h = im.size
 
-        ##fig, ax = plt.subplots(1, 1, figsize=(10, 10))  # Single subplot
-        #ax.imshow(im)
+        #visualize_multiple_attention_maps(im, dec_attn_weights_entity, title_prefix="Entity ", image_size=im.size)
 
-        #for i, (bxmin, bymin, bxmax, bymax) in enumerate(bboxes_scaled):
-        #     class_index = probas[keep][i].argmax()
-        #     for key, value in label_id.items(): # get the class name from the class index
-        #         if value == class_index:
-        #             class_name = key
+        fig, axs = plt.subplots(ncols=len(indices), nrows=2, figsize=(22, 7))
+        for idx, ax_i, (oxmin, oymin, oxmax, oymax) in \
+                zip(keep_queries, axs.T, bboxes_scaled[indices]):
+            #class_index = probas[keep][idx].argmax()
+            ax = ax_i[0]
+            ax.imshow(dec_attn_weights_entity[0, idx].view(h, w))
+            ax.axis('off')
+            ax.set_title(f'query id: {idx.item()}')
+            # ax = ax_i[1]
+            # ax.imshow(dec_attn_weights_obj[0, idx].view(h, w))
+            # ax.axis('off')
+            ax = ax_i[1]
+            ax.imshow(im)
+            ax.add_patch(plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
+                                       fill=False, color='orange', linewidth=2.5))
+            class_name = 'nooo'
+            for key, value in label_id.items(): # get the class name from the class index
+                if value == probas[idx].argmax():
+                    class_name = key
 
+            ax.axis('off')
+            ax.set_title(class_name, fontsize=10)
 
-        #     rect = plt.Rectangle((bxmin, bymin), bxmax - bxmin, bymax - bymin,
-        #                         fill=False, color='blue', linewidth=2.5)
-        #     ax.add_patch(rect)
-        #     # Add text label for class
-        #     ax.text(bxmin, bymin, class_name, fontsize=10, color='red') # add the class name to the bounding box
-
-        # plt.tight_layout()
-        # plt.show()
+        fig.tight_layout()
+        plt.show()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('RelTR inference', parents=[get_args_parser()])

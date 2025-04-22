@@ -4,6 +4,7 @@ import torchvision
 
 #from .coco import build as build_coco, make_coco_transforms
 from .CustomCocoDataset import CustomCocoDataset
+from .CarlaDataset import CarlaDataset
 
 
 def get_coco_api_from_dataset(dataset):
@@ -24,3 +25,6 @@ def get_coco_api_from_dataset(dataset):
 
 def build_custom_dataset(args, anno_file, transform=None):
     return CustomCocoDataset(root_dir=args.datapath, annotation_file=anno_file, mode='bboxes', transforms=transform)
+
+def build_carla_dataset(args, anno_file, transform=None):
+    return CarlaDataset(root_dir=args.datapath, annotation_file=anno_file, transforms=transform)
