@@ -155,7 +155,7 @@ def main(args):
 
     # keep only predictions with 0.+ confidence
     probas = outputs['pred_logits'].softmax(-1)[0, :, :-1]
-    keep = torch.tensor(probas.max(-1).values > 0.85)
+    keep = torch.tensor(probas.max(-1).values > 0.98)
     # convert boxes from [0; 1] to image scales
     bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], im.size)
     #print(bboxes_scaled)
