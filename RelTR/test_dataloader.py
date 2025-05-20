@@ -7,6 +7,10 @@ import util.misc as utils
 from datasets import build_custom_dataset, build_carla_dataset
 from torch.utils.data import DataLoader
 import torchvision.transforms.v2 as v2
+import datasets.transforms as T
+import torchvision.transforms.functional as F
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 
 def get_args_parser():
@@ -73,7 +77,7 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--dataset', default='vg')
     parser.add_argument('--ann_path', default='./data/vg/', type=str)
-    parser.add_argument('--datapath', default='F:\\scenario_runner-0.9.15', type=str)
+    parser.add_argument('--datapath', default='F:\\scenario_runner-0.9.15\\Data', type=str)
 
 
     parser.add_argument('--output_dir', default='',
@@ -100,18 +104,49 @@ def get_args_parser():
 
 def main(args):
 
-    transform = v2.Compose([
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
+    def make_coco_transforms(image_set):
+
+        normalize = T.Compose([
+            T.ToTensor(),
+            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+
+        scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
+
+        if image_set == 'train':
+            return T.Compose([
+                #T.RandomHorizontalFlip(), Contradict ground-truth labels
+                T.SparseColorNoise(),
+                T.RandomColorColumnsPadding(1, 120, (1080, 1920)),
+                T.RandomGrayscale(0.3),
+                T.RandomSelect(
+                    T.RandomResize(scales, max_size=1333),
+                    T.Compose([
+                        T.RandomAdjustSharpness(),
+                        T.RandomGaussianBlur(),
+                        T.RandomColorJitter(),
+                        T.RandomAutocontrast(),
+                        T.RandomResize([400, 500, 600]),
+                        #T.RandomSizeCrop(384, 600), # TODO: cropping causes that some boxes are dropped then no tensor in the relation part! What should we do?
+                        T.RandomResize(scales, max_size=1333),
+                    ])
+                ),
+                normalize])
+
+        if image_set == 'val':
+            return T.Compose([
+                T.RandomResize([800], max_size=1333),
+                normalize,
+            ])
+
+        raise ValueError(f'unknown {image_set}')
 
     utils.init_distributed_mode(args)
     print("git:\n  {}\n".format(utils.get_sha()))
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)
-    test = build_carla_dataset(args=args, anno_file='datasets\\annotations\\Carla\\test_dataset_pre.json', transform=transform)
+    test = build_carla_dataset(args=args, anno_file='datasets\\annotations\\Carla\\train_dataset_pre.json', transform=make_coco_transforms('train'))
     sampler = torch.utils.data.RandomSampler(test)
 
     batch_sampler = torch.utils.data.BatchSampler(
@@ -121,13 +156,44 @@ def main(args):
     dataloader = DataLoader(test, batch_sampler=batch_sampler,
                             collate_fn=utils.collate_fn, num_workers=args.num_workers)
     
-    print(test.__getitem__(1500))
+
+    batch = next(iter(dataloader))
+    images, targets = batch
+
+    # Take the first image tensor
+    img_tensor = images.tensors[0]
+    target = targets[0]
+
+    # Convert tensor to PIL image for display
+    img_pil = F.to_pil_image(img_tensor)
+
+    # Plot image
+    fig, ax = plt.subplots(1)
+    ax.imshow(img_pil)
+
+    # Draw bounding boxes (assumes target["boxes"] is a tensor of [xmin, ymin, xmax, ymax])
+    boxes = target["boxes"]
+
+    for box in boxes:
+        xmin, ymin, xmax, ymax = box
+        width = xmax - xmin
+        height = ymax - ymin
+        rect = patches.Rectangle(
+            (xmin, ymin), width, height, linewidth=2, edgecolor='r', facecolor='none'
+        )
+        ax.add_patch(rect)
+
+    plt.title("Transformed Image with Bounding Boxes")
+    plt.axis('off')
+    plt.show()
     
-    for i in range(len(test)):
-        print(i)
-        batch = next(iter(dataloader))
-        print(batch)
-        break
+    #print(test.__getitem__(1500))
+    
+    # for i in range(len(test)):
+    #     print(i)
+    #     batch = next(iter(dataloader))
+    #     #print(batch)
+    #     #break
 
     #print(next(iter(dataloader)))
     

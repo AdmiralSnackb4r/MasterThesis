@@ -58,8 +58,28 @@ class MergedCocoDataset(Dataset):
             
             # filename is like "aachen_000000_000019_leftImg8bit.png"
             img_name = "_".join(filename.split("_")[1:])  # "000000_000019_leftImg8bit.png"
-            
+
             return dataset, typo, img_name, city
+        
+        elif 'mappilary' in filename:
+            parts = filename.split('_', 2)
+            if len(parts) < 3:
+                raise ValueError(f"Unexpected folder structure: {folder}")
+            dataset = parts[0]
+            typo = parts[1]
+            img_name = parts[2]
+
+            return dataset, typo, img_name, None
+
+
+        elif 'carla' in filename:
+            parts = filename.split('_', 2)
+            dataset = parts[0]
+            typo = parts[1]
+            img_name = parts[2]
+            #print(parts)
+
+            return dataset, typo, img_name, None
     
     def parse_path(self, dataset, typo, img_name, city):
 
@@ -70,10 +90,50 @@ class MergedCocoDataset(Dataset):
             return os.path.splitext(name)[0] + '.jpg'
 
         if dataset == 'bdd':
-            image_path = os.path.join('BDD100', 'bdd100k_images_10k', '10k', typo, strip_bdd_suffix(img_name))
+            image_path = os.path.join(self.image_root, 'BDD100', 'bdd100k_images_10k', '10k', typo, strip_bdd_suffix(img_name))
         elif dataset == 'city':
-            image_path = os.path.join('CityScapes', 'leftImg8bit', typo, city, img_name)
-        
+            img_name = city + '_' + img_name
+            typo = 'val' if 'test' in typo else 'train'
+            image_path = os.path.join(self.image_root, 'CityScapes', 'leftImg8bit', typo, city, img_name)
+        elif dataset == 'mappilary':
+            typo = 'validation' if 'val' in typo else 'training'
+            image_path = os.path.join(self.image_root, 'Mappilary', typo, 'images', img_name) 
+        elif dataset == 'carla':
+            filtered = 'filtered'
+            if 'augmented' in img_name:
+                top_lvl = '_aug'
+                folder_nr, rest = img_name.split('_Aug', 1)
+                folder = typo + '_' + folder_nr
+                rest_parts = rest.lstrip('_').split('_')
+                image_name_parts = []
+                for part in rest_parts:
+                    image_name_parts.append(part)
+                    if '.png' in part:
+                        break
+                image_name = '_'.join(image_name_parts)
+
+                image_path = os.path.join(self.image_root, top_lvl, folder, filtered, image_name)
+            else:
+                top_lvl = '_out'
+                parts = img_name.split('_')
+                img_type = 'rgb'
+
+                for i in reversed(range(len(parts))):
+                    if parts[i].endswith('.png'):
+                        png_part = parts[i]
+                        break
+
+                # The image ID is the part just before the last suffix (remove .png)
+                image_id = parts[i - 1]
+                image_name = f"{image_id}.png"
+
+                # folder_nr is everything before the image ID
+                folder_nr = '_'.join(parts[:i - 1])
+                folder = typo + '_' + folder_nr
+
+                image_path = os.path.join(self.image_root, top_lvl, folder, img_type, filtered, image_name)
+                #print(dataset, typo, img_name)
+
         return image_path
 
     def __getitem__(self, idx):
@@ -101,6 +161,7 @@ class MergedCocoDataset(Dataset):
             'boxes': boxes,
             'labels': labels,
             'image_id': image_id,
+            'orig_size' : torch.tensor((2048, 1024))
         }
 
         if self.transforms:
@@ -115,41 +176,45 @@ if __name__ == '__main__':
     import random
 
     dataset = MergedCocoDataset(
-    json_path="merged_train.json",
+    json_path="annotations/merged_train.json",
     image_root="S:/Datasets/",  # Root folder to images
     transforms=None  # Or custom transform pipeline
     )
 
-    # Load one sample
-    idx = random.randint(0, len(dataset) - 1)
-    img, target = dataset[idx]
-    print(img.size)  # PIL Image size
-    print(target)
+    for idx in range(33037, len(dataset)):
+        img, target = dataset[idx]
+        print(idx)
 
-    # Draw bounding boxes
-    fig, ax = plt.subplots(figsize=(12, 8))
-    ax.imshow(img)
-    #ax.set_title(f"Image: {target['file_name']}", fontsize=14)
-    for box, label in zip(target["boxes"], target["labels"]):
-        x1, y1, x2, y2 = box
-        width = x2 - x1
-        height = y2 - y1
+    # # Load one sample
+    # idx = random.randint(0, len(dataset) - 1)
+    # img, target = dataset[idx]
+    # print(img.size)  # PIL Image size
+    # print(target)
 
-        rect = patches.Rectangle(
-            (x1, y1), width, height,
-            linewidth=2,
-            edgecolor='red',
-            facecolor='none'
-        )
-        ax.add_patch(rect)
-        ax.text(
-            x1, y1 - 5,
-            str(label),
-            color='white',
-            fontsize=9,
-            bbox=dict(facecolor='red', alpha=0.7, boxstyle='round,pad=0.2')
-        )
+    # # Draw bounding boxes
+    # fig, ax = plt.subplots(figsize=(12, 8))
+    # ax.imshow(img)
+    # #ax.set_title(f"Image: {target['file_name']}", fontsize=14)
+    # for box, label in zip(target["boxes"], target["labels"]):
+    #     x1, y1, x2, y2 = box
+    #     width = x2 - x1
+    #     height = y2 - y1
 
-    ax.axis('off')
-    plt.tight_layout()
-    plt.show()
+    #     rect = patches.Rectangle(
+    #         (x1, y1), width, height,
+    #         linewidth=2,
+    #         edgecolor='red',
+    #         facecolor='none'
+    #     )
+    #     ax.add_patch(rect)
+    #     ax.text(
+    #         x1, y1 - 5,
+    #         str(label),
+    #         color='white',
+    #         fontsize=9,
+    #         bbox=dict(facecolor='red', alpha=0.7, boxstyle='round,pad=0.2')
+    #     )
+
+    # ax.axis('off')
+    # plt.tight_layout()
+    # plt.show()

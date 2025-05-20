@@ -92,10 +92,10 @@ class RelTR(nn.Module):
         """             BACKBONE               """
         features, pos = self.backbone(samples)
 
-        print("Features shape: ", features[-1].decompose())
+        #print("Features shape: ", features[-1].decompose())
         #print("Features: ", features)
-        print("Position shape: ", pos[-1].shape)
-        print("Position: ", pos)
+        #print("Position shape: ", pos[-1].shape)
+        #print("Position: ", pos)
         """ ---------------------------------- """
 
         
@@ -204,7 +204,7 @@ class SetCriterion(nn.Module):
         empty_weight[-1] = self.eos_coef
         self.register_buffer('empty_weight', empty_weight)
 
-        self.num_rel_classes = 51 if num_classes == 151 else 31 # Using entity class numbers to adapt rel class numbers
+        self.num_rel_classes = 20 # Using entity class numbers to adapt rel class numbers
         empty_weight_rel = torch.ones(num_rel_classes+1)
         empty_weight_rel[-1] = self.eos_coef
         self.register_buffer('empty_weight_rel', empty_weight_rel)
@@ -302,6 +302,34 @@ class SetCriterion(nn.Module):
         target_classes_o = torch.cat([t["rel_annotations"][J,2] for t, (_, J) in zip(targets, indices[1])])
         target_classes = torch.full(src_logits.shape[:2], self.num_rel_classes, dtype=torch.int64, device=src_logits.device)
         target_classes[idx] = target_classes_o
+
+        print("src_logits shape:", src_logits.shape)
+        print("target_classes_o:", target_classes_o)
+        print("Max label value:", target_classes_o.max())
+        print("Min label value:", target_classes_o.min())
+        print("Expected number of classes (n_classes):", src_logits.shape[-1])
+
+        print("idx:", idx)
+        print("src_logits[idx] shape:", src_logits[idx].shape)
+        print("target_classes_o shape:", target_classes_o.shape)
+
+        print("src_logits[idx] sample:", src_logits[idx][0])
+        print("src_logits[idx] min:", src_logits[idx].min(), "max:", src_logits[idx].max())
+
+        print("idx batch indices:", idx[0])
+        print("idx query indices:", idx[1])
+        print("target_classes_o:", target_classes_o)
+
+        print("Checking NaNs in logits:", torch.isnan(src_logits[idx]).any().item())
+        print("Checking NaNs in targets:", torch.isnan(target_classes_o).any().item())
+        print("Checking logits range:", src_logits[idx].min().item(), src_logits[idx].max().item())
+        print("Checking target_classes_o range:", target_classes_o.min().item(), target_classes_o.max().item())
+
+        print(target_classes_o.dtype)
+
+        n_classes = src_logits.shape[-1]
+        invalid = (target_classes_o < 0) | (target_classes_o >= n_classes)
+        print("Found invalid targets:", target_classes_o[invalid])
 
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight_rel)
 
@@ -422,8 +450,11 @@ class MLP(nn.Module):
 
 def build(args):
 
-    num_classes = 151 if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
-    num_rel_classes = 51 if args.dataset != 'oi' else 31
+    num_classes = 11 #if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
+    num_rel_classes = 20 #if args.dataset != 'oi' else 31
+
+    # num_classes = 151 if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
+    # num_rel_classes = 51 if args.dataset != 'oi' else 31
 
     device = torch.device(args.device)
 

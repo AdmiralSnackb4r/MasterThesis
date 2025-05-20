@@ -1,18 +1,47 @@
 import os
 import torch
 import json
+import glob
+import os
+import time
 from pathlib import Path
 import torchvision.transforms as T
 import argparse
-from models import custom_build_model
-from datasets import build_custom_dataset
+from models import custom_build_model, build_model
+from datasets import build_custom_dataset, build_merged_dataset, build_carla_dataset
 import util.misc as utils
 import numpy as np
 from collections import defaultdict
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from torchvision.ops import box_iou
 import datasets.transforms as T
 from collections import OrderedDict
+from copy import deepcopy
+import matplotlib.pyplot as plt
+
+def plot_pr_curve(
+    precisions, recalls, category='Person', label=None, color=None, ax=None):
+    """Simple plotting helper function"""
+
+    if ax is None:
+        plt.figure(figsize=(10,8))
+        ax = plt.gca()
+
+    if color is None:
+        color = COLORS[0]
+    ax.scatter(recalls, precisions, label=label, s=20, color=color)
+    ax.set_xlabel('recall')
+    ax.set_ylabel('precision')
+    ax.set_title('Precision-Recall curve for {}'.format(category))
+    ax.set_xlim([0.0,1.3])
+    ax.set_ylim([0.0,1.2])
+    return ax
+
+COLORS = [
+    '#1f77b4', '#aec7e8', '#ff7f0e', '#ffbb78', '#2ca02c',
+    '#98df8a', '#d62728', '#ff9896', '#9467bd', '#c5b0d5',
+    '#8c564b', '#c49c94', '#e377c2', '#f7b6d2', '#7f7f7f',
+    '#c7c7c7', '#bcbd22', '#dbdb8d', '#17becf', '#9edae5']
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -21,7 +50,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--num_workers', default=2, type=int)
     #parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
-    parser.add_argument('--datapath', default="S:\\Datasets\\CityScapes\\leftImg8bit", help='path to data')
+    parser.add_argument('--datapath', default="F:\\scenario_runner-0.9.15\\Data", help='path to data')
 
     # image path
     parser.add_argument('--img_path', type=str, default='demo/vg1.jpg',
@@ -36,9 +65,9 @@ def get_args_parser():
                         help="Type of positional embedding to use on top of the image features")
 
     # * Transformer
-    parser.add_argument('--enc_layers', default=6, type=int,
+    parser.add_argument('--enc_layers', default=4, type=int,
                         help="Number of encoding layers in the transformer")
-    parser.add_argument('--dec_layers', default=6, type=int,
+    parser.add_argument('--dec_layers', default=4, type=int,
                         help="Number of decoding layers in the transformer")
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
@@ -46,7 +75,7 @@ def get_args_parser():
                         help="Size of the embeddings (dimension of the transformer)")
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
-    parser.add_argument('--nheads', default=8, type=int,
+    parser.add_argument('--nheads', default=4, type=int,
                         help="Number of attention heads inside the transformer's attentions")
     parser.add_argument('--num_entities', default=100, type=int,
                         help="Number of query slots")
@@ -62,7 +91,7 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--resume', default='ckpt/', help='resume from checkpoint')
     #parser.add_argument('--eval', default='/p/scratch/hai_1008/kromm3/RelTR/eval/run_4/eval.json', help='place to store evaluation')
-    parser.add_argument('--eval', default='RelTR\\eval\\run_1\\eval.json', help='place to store evaluation')
+    parser.add_argument('--eval', default='RelTR\\eval\\run_12\\eval.json', help='place to store evaluation')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -88,8 +117,9 @@ def get_args_parser():
 def make_transforms(image_set):
 
     normalize = T.Compose([
+        T.RandomResize([800], max_size=1333),
         T.ToTensor(),
-        #T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
 
@@ -125,235 +155,552 @@ def box_cxcywh_to_xyxy(boxes):
 def rescale_bboxes(out_bbox, size):
         img_w, img_h = size
         b = box_cxcywh_to_xyxy(out_bbox)
-        b = b * torch.tensor([img_w, img_h, img_w, img_h], dtype=torch.float32).to('cuda')
+        b = b * torch.tensor([img_w, img_h, img_w, img_h], dtype=torch.float32)
         return b
 
 def compute_iou(box1, box2):
-    xA = torch.max(box1[0], box2[0])
-    yA = torch.max(box1[1], box2[1])
-    xB = torch.min(box1[2], box2[2])
-    yB = torch.min(box1[3], box2[3])
+    x1_min, y1_min, x1_max, y1_max = box1
+    x2_min, y2_min, x2_max, y2_max = box2
 
-    inter_area = (xB - xA).clamp(0) * (yB - yA).clamp(0)
+    inter_xmin = max(x1_min, x2_min)
+    inter_ymin = max(y1_min, y2_min)
+    inter_xmax = min(x1_max, x2_max)
+    inter_ymax = min(y1_max, y2_max)
 
-    box1_area = (box1[2] - box1[0]).clamp(0) * (box1[3] - box1[1]).clamp(0)
-    box2_area = (box2[2] - box2[0]).clamp(0) * (box2[3] - box2[1]).clamp(0)
-
+    inter_area = max(0, inter_xmax - inter_xmin) * max(0, inter_ymax - inter_ymin)
+    box1_area = (x1_max - x1_min) * (y1_max - y1_min)
+    box2_area = (x2_max - x2_min) * (y2_max - y2_min)
     union_area = box1_area + box2_area - inter_area
-    return inter_area / (union_area + 1e-6)
 
-def match_predictions(preds, targets, iou_threshold=0.1, confidence=0.3):
-    matched_targets = set()
-    matched_preds = set()
-    tp = 0
+    if union_area == 0:
+        return 0.0
+    return inter_area / union_area
 
-    probas = preds['pred_logits'].softmax(-1)[0, :, :-1]
-    scores, labels = probas.max(-1)
+def calc_iou_individual(pred_box, gt_box):
+    """Calculate IoU of single predicted and ground truth box
+    Args:
+        pred_box (list of floats): location of predicted object as
+            [xmin, ymin, xmax, ymax]
+        gt_box (list of floats): location of ground truth object as
+            [xmin, ymin, xmax, ymax]
+    Returns:
+        float: value of the IoU for the two boxes.
+    Raises:
+        AssertionError: if the box is obviously malformed
+    """
+    #print(gt_box)
+    x1_t, y1_t, x2_t, y2_t = gt_box
+    x1_p, y1_p, x2_p, y2_p = pred_box
+    #x2_t += x1_t
+    #y2_t += y1_t
 
-    keep = scores > confidence
-    filtered_boxes = preds['pred_boxes'][0][keep]
-    filtered_labels = labels[keep]
+    #print(pred_box)
 
-    filtered_boxes = rescale_bboxes(filtered_boxes, targets[0]['orig_size'])
+    if (x1_p > x2_p) or (y1_p > y2_p):
+        raise AssertionError(
+            "Prediction box is malformed? pred box: {}".format(pred_box))
+    if (x1_t > x2_t) or (y1_t > y2_t):
+        raise AssertionError(
+            "Ground Truth box is malformed? true box: {}".format(gt_box))
 
-    for pred_idx, (pred_box, pred_label) in enumerate(zip(filtered_boxes, filtered_labels)):
-        if pred_idx in matched_preds:
-            continue
-        for tgt_idx, tgt_box in enumerate(targets[0]['boxes']):
-            if tgt_idx in matched_targets:
-                continue
-            if pred_label != targets[0]['labels'][tgt_idx]:
-                continue
-            iou = compute_iou(pred_box, tgt_box)
-            if iou > iou_threshold:
-                tp += 1
-                matched_preds.add(pred_idx)
-                matched_targets.add(tgt_idx)
-                break  # Stop after first match
+    if (x2_t < x1_p or x2_p < x1_t or y2_t < y1_p or y2_p < y1_t):
+        return 0.0
 
-    return tp, len(filtered_boxes), len(targets[0]['boxes'])
+    far_x = np.min([x2_t, x2_p])
+    near_x = np.max([x1_t, x1_p])
+    far_y = np.min([y2_t, y2_p])
+    near_y = np.max([y1_t, y1_p])
 
-def evaluate_model(predictions, ground_truths, confidence_threshold=0.95, iou_threshold=0.8):
-    true_positives = 0
-    false_positives = 0
-    false_negatives = 0
-    iou_scores = []
+    inter_area = (far_x - near_x + 1) * (far_y - near_y + 1)
+    true_box_area = (x2_t - x1_t + 1) * (y2_t - y1_t + 1)
+    pred_box_area = (x2_p - x1_p + 1) * (y2_p - y1_p + 1)
+    iou = inter_area / (true_box_area + pred_box_area - inter_area)
+    return iou
 
-    for pred, gt in zip(predictions, ground_truths):
-        pred_logits = pred['pred_logits']  # [num_queries, num_classes]
-        pred_boxes = pred['pred_boxes']    # [num_queries, 4] in cxcywh (normalized)
+def get_single_image_results(gt_boxes, pred_boxes, pred_labels, pred_relations, iou_thr):
+    """Calculates number of true_pos, false_pos, false_neg from single batch of boxes.
+    Args:
+        gt_boxes (list of list of floats): list of locations of ground truth
+            objects as [xmin, ymin, xmax, ymax]
+        pred_boxes (dict): dict of dicts of 'boxes' (formatted like `gt_boxes`)
+            and 'scores'
+        iou_thr (float): value of IoU to consider as threshold for a
+            true prediction.
+    Returns:
+        dict: true positives (int), false positives (int), false negatives (int)
+    """
 
-        probs = pred_logits.softmax(-1)[0, :, :-1]
-        keep = torch.tensor(probs.max(-1).values > confidence_threshold)
+    all_pred_indices = range(len(pred_boxes))
+    all_gt_indices = range(len(gt_boxes))
+    if len(all_pred_indices) == 0:
+        tp = 0
+        fp = 0
+        fn = len(gt_boxes)
+        return {'true_pos': tp, 'false_pos': fp, 'false_neg': fn}
+    if len(all_gt_indices) == 0:
+        tp = 0
+        fp = len(pred_boxes)
+        fn = 0
+        return {'true_pos': tp, 'false_pos': fp, 'false_neg': fn}
 
-        filtered_boxes = pred_boxes[0, keep]
+    gt_idx_thr = []
+    pred_idx_thr = []
+    ious = []
 
-        if filtered_boxes.numel() == 0:
-            false_negatives += len(gt[0]['boxes'])
-            continue
+    gt_rel_idx = []
+    pred_rel_idx = []
 
-        # Convert predicted boxes to xyxy and scale to pixel space
-        filtered_boxes = box_cxcywh_to_xyxy(filtered_boxes.to('cuda'))
+    index_matcher = {}
 
-        img_w, img_h = gt[0]['orig_size'].to('cuda')
-
-        filtered_boxes = filtered_boxes * torch.tensor([img_w, img_h, img_w, img_h], dtype=torch.float32).to('cuda')
-
-        #filtered_boxes = rescale_bboxes(filtered_boxes, orig_size)
-
-        # Targets already in xyxy, absolute coordinates
-        target_boxes = gt[0]['boxes'].to('cuda')
-        target_labels = gt[0]['labels'].to('cuda')
-
-        #print("pred", filtered_boxes, "target", target_boxes)
-
-        matched_preds = set()
-        matched_gts = set()
-
-        #print(len(filtered_boxes), len(target_boxes))
-
-        for pred_idx, pred_box in enumerate(filtered_boxes):
-            best_iou = 0
-            best_gt_idx = -1
-            for gt_idx, gt_box in enumerate(target_boxes):
-                if gt_idx in matched_gts:
-                    continue
-                iou = compute_iou(pred_box, gt_box)
-                print(iou)
-                if iou > best_iou:
-                    best_iou = iou
-                    best_gt_idx = gt_idx
-
-            if best_iou >= iou_threshold and probs[keep][pred_idx].argmax() == target_labels[best_gt_idx]:
-                true_positives += 1
-                iou_scores.append(best_iou.item())
-                matched_preds.add(pred_idx)
-                matched_gts.add(best_gt_idx)
-            else:
-                false_positives += 1
-
-        false_negatives += target_boxes.size(0) - len(matched_gts)
+    for ipb, (pred_box, pred_label) in enumerate(zip(pred_boxes, pred_labels)):
+        for igb, (gt_box, gt_label) in enumerate(zip(gt_boxes['boxes'], gt_boxes['labels'])):
+            #print(pred_rels, gt_rels)
+            iou = calc_iou_individual(pred_box, gt_box)
+            if iou > iou_thr and pred_label == gt_label:
+                index_matcher[ipb] = igb
+                gt_idx_thr.append(igb)
+                pred_idx_thr.append(ipb)
+                ious.append(iou)
     
-    print(true_positives, false_negatives, false_positives)
+    #print(index_matcher)
+    #print(len(pred_relations))
 
-    precision = true_positives / (true_positives + false_positives + 1e-6)
-    recall = true_positives / (true_positives + false_negatives + 1e-6)
-    mean_iou = sum(iou_scores) / len(iou_scores) if iou_scores else 0.0
+    count_yes = 0
+    count_no = 0
+    count_error = 0
+            
+    for triplet in pred_relations:
+        pred_s, pred_o, pred_r = triplet
+        try:
+            mapped_tripplet = [index_matcher[pred_s], index_matcher[pred_o], pred_r]
+            #print(gt_boxes['relations'])
+            #print(mapped_tripplet)
+            mapped_tripplet = torch.tensor(mapped_tripplet).to(gt_boxes['relations'].device)  # convert to tensor
 
-    result = {
-        'precision' : precision,
-        'recall' : recall,
-        'mean_iou' : mean_iou
-    }
+            # Now check if there is any row equal to mapped_tripplet
+            match = (gt_boxes['relations'] == mapped_tripplet).all(dim=1).any()
 
-    return result
+            if match:
+                count_yes += 1
+            else:
+                count_no += 1
+        except KeyError:
+            count_error += 1
+
+    #print("yes: ", count_yes, " no: ", count_no)
+
+    args_desc = np.argsort(ious)[::-1]
+    if len(args_desc) == 0:
+        # No matches
+        tp = 0
+        fp = len(pred_boxes)
+        fn = len(gt_boxes)
+    else:
+        gt_match_idx = []
+        pred_match_idx = []
+        for idx in args_desc:
+            gt_idx = gt_idx_thr[idx]
+            pr_idx = pred_idx_thr[idx]
+            # If the boxes are unmatched, add them to matches
+            if (gt_idx not in gt_match_idx) and (pr_idx not in pred_match_idx):
+                gt_match_idx.append(gt_idx)
+                pred_match_idx.append(pr_idx)
+        tp = len(gt_match_idx)
+        fp = len(pred_boxes) - len(pred_match_idx)
+        fn = len(gt_boxes) - len(gt_match_idx)
+
+    return {'true_pos': tp, 'false_pos': fp, 'false_neg': fn, 'true_pos_rel' : count_yes, 'false_pos_rel' : count_no, 'false_neg_rel' : count_error}
+
+def get_model_scores_map(pred_boxes):
+    """Creates a dictionary of from model_scores to image ids.
+    Args:
+        pred_boxes (dict): dict of dicts of 'boxes' and 'scores'
+    Returns:
+        dict: keys are model_scores and values are image ids (usually filenames)
+    """
+    model_scores_map = {}
+    for img_id, val in pred_boxes.items():
+        for score in val['scores']:
+            if score not in model_scores_map.keys():
+                model_scores_map[score] = [img_id]
+            else:
+                model_scores_map[score].append(img_id)
+    return model_scores_map
+
+def get_avg_precision_at_iou(gt_boxes, pred_boxes, iou_thr=0.5):
+    """Calculates average precision at given IoU threshold.
+    Args:
+        gt_boxes (list of list of floats): list of locations of ground truth
+            objects as [xmin, ymin, xmax, ymax]
+        pred_boxes (list of list of floats): list of locations of predicted
+            objects as [xmin, ymin, xmax, ymax]
+        iou_thr (float): value of IoU to consider as threshold for a
+            true prediction.
+    Returns:
+        dict: avg precision as well as summary info about the PR curve
+        Keys:
+            'avg_prec' (float): average precision for this IoU threshold
+            'precisions' (list of floats): precision value for the given
+                model_threshold
+            'recall' (list of floats): recall value for given
+                model_threshold
+            'models_thrs' (list of floats): model threshold value that
+                precision and recall were computed for.
+    """
+    model_scores_map = get_model_scores_map(pred_boxes)
+    sorted_model_scores = sorted(model_scores_map.keys())
+
+    # Sort the predicted boxes in descending order (lowest scoring boxes first):
+    for img_id in pred_boxes.keys():
+        arg_sort = np.argsort(pred_boxes[img_id]['scores'])
+        pred_boxes[img_id]['scores'] = np.array(pred_boxes[img_id]['scores'])[arg_sort].tolist()
+        pred_boxes[img_id]['boxes'] = np.array(pred_boxes[img_id]['boxes'])[arg_sort].tolist()
+        pred_boxes[img_id]['labels'] = np.array(pred_boxes[img_id]['labels'])[arg_sort].tolist()
+
+        #print(len(pred_boxes[img_id]['rel_logits']))
+
+        pred_boxes[img_id]['rel_logits'] = np.array(pred_boxes[img_id]['rel_logits'])[arg_sort]
+        pred_boxes[img_id]['sub_logits'] = np.array(pred_boxes[img_id]['sub_logits'])[arg_sort]
+        pred_boxes[img_id]['obj_logits'] = np.array(pred_boxes[img_id]['obj_logits'])[arg_sort]
+
+        relations = []
 
 
-def evaluate(model, dataloader, device='cuda'):
-    model.eval()
-    total_fp = 0
-    total_tp = 0
-    total_fn = 0
+    pred_boxes_pruned = deepcopy(pred_boxes)
 
-    for samples, targets in dataloader:
-        samples = samples.to(device)
-        with torch.no_grad():
-            outputs = model(samples)
+    precisions = []
+    recalls = []
+    precisions_rel = []
+    recalls_rel = []
+    model_thrs = []
+    img_results = {}
+    # Loop over model score thresholds and calculate precision, recall
+    for ithr, model_score_thr in enumerate(sorted_model_scores[:-1]):
+        # On first iteration, define img_results for the first time:
+        img_ids = gt_boxes.keys() if ithr == 0 else model_scores_map[model_score_thr]
+        for img_id in img_ids:
+            gt_boxes_img = gt_boxes[img_id]
+            box_scores = pred_boxes_pruned[img_id]['scores']
+            start_idx = 0
+            for score in box_scores:
+                if score <= model_score_thr:
+                    pred_boxes_pruned[img_id]
+                    start_idx += 1
+                else:
+                    break
 
-        #outputs = [{k: v.cpu() for k, v in o.items()} for o in outputs]
-        #targets = [{k: v for k, v in t.items()} for t in targets]
+            # Remove boxes, scores of lower than threshold scores:
+            pred_boxes_pruned[img_id]['scores'] = pred_boxes_pruned[img_id]['scores'][start_idx:]
+            pred_boxes_pruned[img_id]['boxes'] = pred_boxes_pruned[img_id]['boxes'][start_idx:]
+            pred_boxes_pruned[img_id]['labels'] = pred_boxes_pruned[img_id]['labels'][start_idx:]
 
-        #for pred, gt in zip (outputs, targets):
-        tp, num_preds, num_gts = match_predictions(outputs, targets)
-        total_tp += tp
-        total_fp += (num_preds - tp)
-        total_fn += (num_gts - tp)
-
-        print(total_tp, total_fp, total_fn)
-        #break
-
-    precision = total_tp / (total_tp + total_fp + 1e-6)
-    recall = total_tp / (total_tp + total_fn + 1e-6)
-    f1 = 2 * precision * recall / (precision + recall + 1e-6)
-
-    result = {
-        'precision' : precision,
-        'recall' : recall,
-        'f1' : f1
-    }
-
-    return result
+            pred_boxes[img_id]['rel_logits'] = np.array(pred_boxes[img_id]['rel_logits'])[start_idx:]
+            pred_boxes[img_id]['sub_logits'] = np.array(pred_boxes[img_id]['sub_logits'])[start_idx:]
+            pred_boxes[img_id]['obj_logits'] = np.array(pred_boxes[img_id]['obj_logits'])[start_idx:]
 
 
 
-def find_checkpoints(args):
-    checkpoints = []
-    for root, _, files in os.walk(args.resume):
-        for file in files:
-            #print(file)
-            if file.endswith('.pth'):
-                checkpoints.append(os.path.join(root, file))
-    return checkpoints
+            for pred in range(len(pred_boxes[img_id]['rel_logits'])):
+                sub = pred_boxes[img_id]['sub_logits'][pred].argmax()
+                obj = pred_boxes[img_id]['obj_logits'][pred].argmax()
+                rel = pred_boxes[img_id]['rel_logits'][pred].argmax()
+                relations.append([sub, obj, rel])
+
+            pred_boxes[img_id]['relations'] = np.array(relations)
+
+            # Recalculate image results for this image
+            img_results[img_id] = get_single_image_results(
+                gt_boxes_img, pred_boxes_pruned[img_id]['boxes'],  pred_boxes_pruned[img_id]['labels'], pred_boxes[img_id]['relations'], iou_thr)
+
+        prec, rec, prec_rel, rec_rel = calc_precision_recall(img_results)
+        precisions.append(prec)
+        recalls.append(rec)
+        precisions_rel.append(prec_rel)
+        recalls_rel.append(rec_rel)
+        model_thrs.append(model_score_thr)
+
+    precisions = np.array(precisions)
+    recalls = np.array(recalls)
+    precisions_rel = np.array(precisions_rel)
+    recalls_rel = np.array(recalls_rel)
+
+    prec_at_rec = []
+    for recall_level in np.linspace(0.0, 1.0, 11):
+        try:
+            args = np.argwhere(recalls >= recall_level).flatten()
+            prec = max(precisions[args])
+        except ValueError:
+            prec = 0.0
+        prec_at_rec.append(prec)
+    avg_prec = np.mean(prec_at_rec)
+
+    prec_at_rec_rel = []
+    for recall_level in np.linspace(0.0, 1.0, 11):
+        try:
+            args = np.argwhere(recalls_rel >= recall_level).flatten()
+            prec_rel = max(precisions_rel[args])
+        except ValueError:
+            prec_rel = 0.0
+        prec_at_rec_rel.append(prec_rel)
+    avg_prec_rel = np.mean(prec_at_rec_rel)
+
+    return {
+        'avg_prec': avg_prec,
+        'avg_prec_rel': avg_prec_rel,
+        'precisions': precisions,
+        'recalls': recalls,
+        'model_thrs': model_thrs,
+        'precisions_rel' : precisions_rel,
+        'recalls_rel' : recalls_rel,
+        }
+
+def calc_precision_recall(img_results):
+    """Calculates precision and recall from the set of images
+    Args:
+        img_results (dict): dictionary formatted like:
+            {
+                'img_id1': {'true_pos': int, 'false_pos': int, 'false_neg': int},
+                'img_id2': ...
+                ...
+            }
+    Returns:
+        tuple: of floats of (precision, recall)
+    """
+    true_pos = 0; false_pos = 0; false_neg = 0
+    true_pos_rel = 0; false_pos_rel = 0; false_neg_rel = 0
+    
+    for _, res in img_results.items():
+        true_pos += res['true_pos']
+        false_pos += res['false_pos']
+        false_neg += res['false_neg']
+        true_pos_rel += res['true_pos_rel']
+        false_pos_rel += res['false_pos_rel']
+        false_neg_rel += res['false_neg_rel']
+
+    try:
+        precision = true_pos/(true_pos + false_pos)
+    except ZeroDivisionError:
+        precision = 0.0
+    try:
+        recall = true_pos/(true_pos + false_neg)
+    except ZeroDivisionError:
+        recall = 0.0
+
+    try:
+        precision_rel = true_pos_rel/(true_pos_rel + false_pos_rel)
+    except ZeroDivisionError:
+        precision_rel = 0.0
+    try:
+        recall_rel = true_pos_rel/(true_pos_rel + false_neg_rel)
+    except ZeroDivisionError:
+        recall_rel = 0.0
+
+    return (precision, recall, precision_rel, recall_rel)
+
+def compute_ap(pred_boxes, pred_scores, gt_boxes, iou_threshold=0.5):
+    if len(pred_boxes) == 0:
+        return 0.0
+
+    sorted_indices = np.argsort(-np.array(pred_scores))
+    pred_boxes = [pred_boxes[i] for i in sorted_indices]
+
+    gt_matched = np.zeros(len(gt_boxes))
+    tp = np.zeros(len(pred_boxes))
+    fp = np.zeros(len(pred_boxes))
+
+    for i, pred_box in enumerate(pred_boxes):
+        ious = np.array([compute_iou(pred_box, gt_box) for gt_box in gt_boxes])
+        max_iou_idx = np.argmax(ious)
+        max_iou = ious[max_iou_idx]
+
+        if max_iou >= iou_threshold and not gt_matched[max_iou_idx]:
+            tp[i] = 1
+            gt_matched[max_iou_idx] = 1
+        else:
+            fp[i] = 1
+
+    tp_cumsum = np.cumsum(tp)
+    fp_cumsum = np.cumsum(fp)
+
+    recalls = tp_cumsum / (len(gt_boxes) + 1e-6)
+    precisions = tp_cumsum / (tp_cumsum + fp_cumsum + 1e-6)
+
+    recalls = np.concatenate([[0], recalls, [1]])
+    precisions = np.concatenate([[1], precisions, [0]])
+
+    for i in range(len(precisions) - 2, -1, -1):
+        precisions[i] = max(precisions[i], precisions[i + 1])
+
+    indices = np.where(recalls[1:] != recalls[:-1])[0]
+    ap = np.sum((recalls[indices + 1] - recalls[indices]) * precisions[indices + 1])
+
+    return ap
+
+# Your main:
 
 def main(args):
-    #utils.init_distributed_mode(args)
     device = torch.device(args.device)
 
-    #dataset_test = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/train_dataset.json', transform=make_transforms('val'))
-    dataset_test = build_custom_dataset(args=args, anno_file='TrainOnCityScapes\\CityScapes\\annotations\\with_filter\\test_dataset.json', transform=make_transforms('val'))
-    sampler_test = torch.utils.data.RandomSampler(dataset_test)
+    dataset_test = build_carla_dataset(args=args, anno_file='RelTR\\datasets\\annotations\\Carla\\test_dataset_pre.json', transform=make_transforms('val'))
+    sampler_test = RandomSampler(dataset_test)
 
     data_loader_val = DataLoader(dataset_test, args.batch_size, sampler=sampler_test,
                                   drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
 
-
-    model, criterion, _ = custom_build_model(args)
+    model, criterion, _ = build_model(args)
     model.to(device)
-    #checkpoint = torch.load('/p/home/jusers/kromm3/jureca/master/scratch/RelTR/ckpt/run_4/checkpoint0114_.pth', map_location='cpu')
-    checkpoint = torch.load('RelTR\\ckpt\\run_1\\checkpoint0414_.pth', map_location='cpu', weights_only=False)
+
+    checkpoint = torch.load('RelTR\\ckpt\\run_11\\checkpoint0329.pth', map_location='cpu', weights_only=False)
     new_state_dict = OrderedDict()
     state_dict = checkpoint['model']
     for k, v in state_dict.items():
-        name = k[7:] if k.startswith("module.") else k # remove `module.`
+        name = k[7:] if k.startswith("module.") else k
         new_state_dict[name] = v
     model.load_state_dict(new_state_dict, strict=True)
-    # outputs_arr = []
-    # targets_arr = []
-    # model.eval()
 
-    # with torch.no_grad():
-    #     for samples, targets in data_loader_val:
-    #         samples = samples.to(device)
-    #         targets_arr.append(targets)  # still on CPU
-    #         pred = model(samples)
+    model.eval()
+    outputs_arr = []
+    targets_arr = []
 
-    #         output_to_cpu = {
-    #             'pred_logits' : pred['pred_logits'].cpu(),
-    #             'pred_boxes' : pred['pred_boxes'].cpu()
-    #         }
-    #         outputs_arr.append(output_to_cpu)
+    with torch.no_grad():
+        for samples, targets in data_loader_val:
+            #print(targets)
+            samples = samples.to(device)
+            targets_arr.extend(targets)  # store ground-truth
 
-    #         del samples
-    #         del targets
-    #         del pred
-    #         torch.cuda.empty_cache()
+            outputs = model(samples)
+            
+            #outputs = rescale_bboxes(outputs, size=targets)
+            output_to_cpu = {
+                'pred_logits': outputs['pred_logits'].cpu(),
+                'pred_boxes': outputs['pred_boxes'].cpu(),
+                'rel_logits' : outputs['rel_logits'].cpu(),
+                'sub_logits' : outputs['sub_logits'].cpu(),
+                'obj_logits' : outputs['obj_logits'].cpu()
+            }
+            outputs_arr.append(output_to_cpu)
 
-    # del model
-        
-    # results = evaluate_model(outputs_arr, targets_arr)
-    # print(results)
+            del samples
+            torch.cuda.empty_cache()
+
+    # Now prepare predictions and ground-truths for bbox AP calculation
+
+    pred_boxes_all = []
+    pred_scores_all = []
+    gt_boxes_all = {}
+    pred_boxes_dict = {}
+
+    for output, targets in zip(outputs_arr, targets_arr):
+        img_id = targets['image_id'].item()  # Or however you store image IDs
+        pred_logits = output['pred_logits'].squeeze(0)
+        pred_boxes = output['pred_boxes'].squeeze(0)
+
+        rel_logits = outputs['rel_logits'].softmax(-1)[0, :, :-1]
+        sub_logits = outputs['sub_logits'].softmax(-1)[0, :, :-1]
+        obj_logits = outputs['obj_logits'].softmax(-1)[0, :, :-1]
 
 
-    results = evaluate(model, data_loader_val, 'cuda')
-    print(results)
 
-    os.makedirs(os.path.dirname(args.eval), exist_ok=True)
+        probs = pred_logits.softmax(-1)
+        max_scores, labels = probs[..., :-1].max(-1)
+        keep = max_scores > 0.05
 
+        #pred_boxes = pred_boxes[keep]
+        #max_scores = max_scores[keep]
 
-    with open(args.eval, 'w') as json_file:
-        json.dump(results, json_file, indent=4)
-        print(f"JSON saved to {args.eval}")
+        img_w, img_h = targets['orig_size'].tolist()
+        pred_boxes = box_cxcywh_to_xyxy(pred_boxes)
+
+        boxes = targets['boxes']
+        target_labels = targets['labels']
+        relations = targets['rel_annotations']
+        boxes = box_cxcywh_to_xyxy(boxes)
+
+        # Convert to lists
+        pred_boxes = pred_boxes.cpu().numpy().tolist()
+        max_scores = max_scores.cpu().numpy().tolist()
+
+        rel_logits = rel_logits.cpu().numpy()
+        sub_logits = sub_logits.cpu().numpy()
+        obj_logits = obj_logits.cpu().numpy()
+
+        #print(rel_logits, sub_logits, obj_logits)
+
+        # Save into big dict
+        pred_boxes_dict[img_id] = {
+            'boxes': pred_boxes,
+            'scores': max_scores,
+            'labels' : labels,
+            'rel_logits' : rel_logits,
+            'sub_logits' : sub_logits,
+            'obj_logits' : obj_logits
+        }
+
+        gt_boxes_all[img_id] = {
+            'boxes' : boxes,
+            'labels' : target_labels,
+            'relations' : relations
+        }
+
+    # Compute AP
+    # Runs it for one IoU threshold
+    #iou_thr = 0.7
+    #start_time = time.time()
+    #data = get_avg_precision_at_iou(gt_boxes_all, pred_boxes_dict, iou_thr=iou_thr)
+    #end_time = time.time()
+    #print('Single IoU calculation took {:.4f} secs'.format(end_time - start_time))
+    #print('avg precision: {:.4f}'.format(data['avg_prec']))
+
+    save_json = {}
+
+    start_time = time.time()
+    ax = None
+    avg_precs = []
+    iou_thrs = []
+    for idx, iou_thr in enumerate(np.linspace(0.5, 0.95, 10)):
+        data = get_avg_precision_at_iou(gt_boxes_all, pred_boxes_dict, iou_thr=iou_thr)
+        save_data = deepcopy(data)
+
+        for key in save_data.keys():
+            if isinstance(save_data[key], np.ndarray):
+                save_data[key] = save_data[key].tolist()
+
+        save_json[idx] = save_data
+        avg_precs.append(data['avg_prec'])
+        iou_thrs.append(iou_thr)
+
+        precisions = data['precisions']
+        recalls = data['recalls']
+        ax = plot_pr_curve(
+            precisions, recalls, label='{:.2f}'.format(iou_thr), color=COLORS[idx*2], ax=ax)
+        print(f"Finisehd evaluation for threshold {iou_thr}")
     
+
+    # prettify for printing:
+    with open('carla_set.json', 'w') as f:
+        json.dump(save_json, f, indent=4)
+
+    avg_precs = [float('{:.4f}'.format(ap)) for ap in avg_precs]
+    iou_thrs = [float('{:.4f}'.format(thr)) for thr in iou_thrs]
+    print('map: {:.2f}'.format(100*np.mean(avg_precs)))
+    print('avg precs: ', avg_precs)
+    print('iou_thrs:  ', iou_thrs)
+    plt.legend(loc='upper right', title='IOU Thr', frameon=True)
+    for xval in np.linspace(0.0, 1.0, 11):
+        plt.vlines(xval, 0.0, 1.1, color='gray', alpha=0.3, linestyles='dashed')
+    end_time = time.time()
+    print('\nPlotting and calculating mAP takes {:.4f} secs'.format(end_time - start_time))
+    plt.savefig('carla_set.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+
+# Single IoU calculation took 791.2773 secs
+# avg precision: 1.0000
+# map: 97.44
+# avg precs:  [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9993, 0.9993, 0.9812, 0.7645]
+# iou_thrs:   [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+
+# Plotting and calculating mAP takes 7789.1122 secs
 
 
 if __name__ == "__main__":

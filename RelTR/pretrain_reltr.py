@@ -12,9 +12,9 @@ from torch.utils.data import DataLoader, DistributedSampler
 from models import build_model, custom_build_model
 #import torchvision.transforms as T
 from torchvision.transforms import ToPILImage
-from datasets import build_custom_dataset, get_coco_api_from_dataset
+from datasets import build_custom_dataset, get_coco_api_from_dataset, build_merged_dataset
 from PIL import Image
-from engine import train_one_epoch, evaluate
+from pre_engine import train_one_epoch, evaluate
 import torchvision.transforms.v2 as v2
 from distributed_utils import *
 from torch.utils.tensorboard import SummaryWriter
@@ -61,9 +61,9 @@ def get_args_parser():
 
     # * Transformer
     parser.add_argument('--enc_layers', default=6, type=int,
-                        help="Number of encoding layers in the transformer")
-    parser.add_argument('--dec_layers', default=6, type=int,
-                        help="Number of decoding layers in the transformer")
+                        help="Number of encoding layers in the transformer") #6
+    parser.add_argument('--dec_layers', default=6, type=int, 
+                        help="Number of decoding layers in the transformer") #6
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
     parser.add_argument('--hidden_dim', default=256, type=int,
@@ -71,12 +71,14 @@ def get_args_parser():
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
     parser.add_argument('--nheads', default=8, type=int,
-                        help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_entities', default=100, type=int,
+                        help="Number of attention heads inside the transformer's attentions") #8
+    parser.add_argument('--num_entities', default=300, type=int,
                         help="Number of query slots")
     parser.add_argument('--num_triplets', default=200, type=int,
                         help="Number of query slots")
     parser.add_argument('--pre_norm', action='store_true')
+
+    # run_6 enc/dec layers = 4, nheads = 4, --> higher loses
 
     # Loss
     parser.add_argument('--no_aux_loss', dest='aux_loss', action='store_false',
@@ -102,15 +104,15 @@ def get_args_parser():
     parser.add_argument('--dataset', default='pretrain')
     parser.add_argument('--ann_path', default='./data/vg/', type=str)
     #parser.add_argument('--datapath', default='S:\\Datasets\\CityScapes\\leftImg8bit', type=str)
-    parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
+    parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3", help='path to data')
     parser.add_argument('--on_cluster', type=bool, default=True)
 
-    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_4',
+    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_first_part_with_sim',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_first_part_with_sim/checkpoint0142_.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
@@ -166,7 +168,7 @@ def main(args):
     np.random.seed(seed)
     random.seed(seed)
 
-    writer = SummaryWriter(log_dir='/p/project/hai_1008/kromm3/RelTR/logs/run_5')
+    writer = create_writer(log_dir='/p/project/hai_1008/kromm3/RelTR/logs/run_first_part_with_sim')
 
     model, criterion, postprocessors = custom_build_model(args)
     model.to(device)
@@ -191,8 +193,8 @@ def main(args):
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
 
     if args.on_cluster:
-        dataset_train = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/train_dataset.json', transform=make_transforms('train'))
-        dataset_val = build_custom_dataset(args=args, anno_file='/p/project/hai_1008/kromm3/TrainOnCityScapes/CityScapes/annotations/valid_dataset.json', transform=make_transforms('val'))
+        dataset_train = build_merged_dataset(args, anno_file="/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Merged/merged_with_carla_train.json", transform=make_transforms('train'))
+        dataset_val = build_merged_dataset(args=args, anno_file='/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Merged/merged_valid.json', transform=make_transforms('val'))
     else:
         dataset_train = build_custom_dataset(args=args, anno_file='datasets\\annotations\\train_dataset.json', transform=make_transforms('train'))
         dataset_val = build_custom_dataset(args=args, anno_file='datasets\\annotations\\valid_dataset.json', transform=make_transforms('val'))
@@ -218,25 +220,36 @@ def main(args):
 
     if args.resume:
          
-        if args.distributed:
-            print0(f"Resume training with checkpoint {args.resume}")
-            checkpoint = torch.load(args.resume, map_location='cpu')
-            model.load_state_dict(checkpoint['model'], strict=True)
-        else:
-            print(f"Resume training with checkpoint {args.resume}")
-            checkpoint = torch.load(args.resume, map_location='cpu')
-            new_state_dict = OrderedDict()
-            state_dict = checkpoint['model']
-            for k, v in state_dict.items():
-                name = k[7:] if k.startswith("module.") else k # remove `module.`
-                new_state_dict[name] = v
-            model.load_state_dict(new_state_dict, strict=True)
-            
+        #if args.distributed:
+        print0(f"Resume training with checkpoint {args.resume}")
+        checkpoint = torch.load(args.resume, map_location='cpu')
+
+        #state_dict = torch.load("checkpoint.pth")
+        from collections import OrderedDict
+        state_dict = checkpoint['model']
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            new_key = k
+            print(new_key)
+            new_state_dict[new_key] = v
+
+        model.load_state_dict(new_state_dict, strict=True)
+
+        #model.load_state_dict(checkpoint['model'], strict=True)
+        # else:
+        #     print(f"Resume training with checkpoint {args.resume}")
+        #     checkpoint = torch.load(args.resume, map_location='cpu')
+        #     new_state_dict = OrderedDict()
+        #     state_dict = checkpoint['model']
+        #     for k, v in state_dict.items():
+        #         name = k[7:] if k.startswith("module.") else k # remove `module.`
+        #         new_state_dict[name] = v
+        #     model.load_state_dict(new_state_dict, strict=True)
 
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-            args.start_epoch = checkpoint['epoch'] + 1
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+                args.start_epoch = checkpoint['epoch'] + 1
 
 
     if args.eval:
@@ -263,13 +276,7 @@ def main(args):
         train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
         eval_stats = evaluate(model, criterion, data_loader_val, device)
 
-        writer.add_scalar('Train/Loss', sum(train_stats['loss']) / len(train_stats['loss']))
-        writer.add_scalar('Train/Class Error', sum(train_stats['class_error']) / len(train_stats['class_error']))
-        writer.add_scalar('Train/BBox Error', sum(train_stats['loss_bbox']) / len(train_stats['loss_bbox']))
-
-        writer.add_scalar('Val/Loss', sum(eval_stats['loss']) / len(eval_stats['loss']))
-        writer.add_scalar('Val/Class Error', sum(eval_stats['class_error']) / len(eval_stats['class_error']))
-        writer.add_scalar('Val/BBox Error', sum(eval_stats['loss_bbox']) / len(eval_stats['loss_bbox']))
+        add_stats(writer, train_stats, eval_stats, epoch)
 
         eval_loss = sum(eval_stats['loss']) / len(eval_stats['loss'])
         lr_scheduler.step()
@@ -289,7 +296,7 @@ def main(args):
                     'args': args,
                 }, checkpoint_path)
 
-
+    close_writer(writer)
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     if args.distributed:

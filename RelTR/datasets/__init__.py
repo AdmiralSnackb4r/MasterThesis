@@ -5,7 +5,7 @@ import torchvision
 #from .coco import build as build_coco, make_coco_transforms
 from .CustomCocoDataset import CustomCocoDataset
 from .CarlaDataset import CarlaDataset
-
+from .MergedDataSet import MergedCocoDataset
 
 def get_coco_api_from_dataset(dataset):
     for _ in range(10):
@@ -28,3 +28,6 @@ def build_custom_dataset(args, anno_file, transform=None):
 
 def build_carla_dataset(args, anno_file, transform=None):
     return CarlaDataset(root_dir=args.datapath, annotation_file=anno_file, transforms=transform)
+
+def build_merged_dataset(args, anno_file, transform=None):
+    return MergedCocoDataset(image_root=args.datapath, json_path=anno_file, transforms=transform)

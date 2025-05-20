@@ -6,11 +6,13 @@ import random
 
 import PIL
 import torch
+import math
 import torchvision.transforms as T
 import torchvision.transforms.functional as F
-
+from PIL import Image
 from util.box_ops import box_xyxy_to_cxcywh
 from util.misc import interpolate
+import numpy as np
 
 
 def crop(image, target, region):
@@ -274,3 +276,206 @@ class Compose(object):
             format_string += "    {0}".format(t)
         format_string += "\n)"
         return format_string
+    
+
+### BELOW ARE SELF IMPLEMENTED TRANSFORMATIONS ###
+
+class RandomColorColumnsPadding(object):
+    """
+    Append a random number (between min_cols and max_cols) of single-pixel-wide
+    columns of random color to a random side of the image.
+    Then resize to a target size.
+
+    USE BEFORE TO TENSOR
+    """
+    def __init__(self, min_cols: int, max_cols: int, size, p: float = 0.3):
+        self.min_cols = min_cols
+        self.max_cols = max_cols
+        self.size = size
+        self.p = p
+
+
+    def __call__(self, img: Image.Image, target):
+        if random.random() > self.p:
+            return F.resize(img, self.size), target
+
+        direction = random.choice(['left', 'right', 'top', 'bottom'])
+        w, h = img.size
+        n_cols = random.randint(self.min_cols, self.max_cols)
+
+        img_np = np.array(img)
+        mode = img.mode
+
+        if mode == 'RGB':
+            c = 3
+        elif mode == 'L':
+            c = 1
+            img_np = img_np[:, :, None]  # Add channel dimension
+        else:
+            raise ValueError(f"Unsupported image mode: {mode}")
+
+        # Shape for the random color padding block
+        if direction in ['left', 'right']:
+            pad_shape = (h, n_cols, c)
+        else:  # top or bottom
+            pad_shape = (n_cols, w, c)
+
+        # Random colors for the padding
+        pad_array = np.random.randint(0, 256, size=pad_shape, dtype=np.uint8)
+
+        # Concatenate along correct axis
+        if direction == 'left':
+            new_img = np.concatenate((pad_array, img_np), axis=1)
+        elif direction == 'right':
+            new_img = np.concatenate((img_np, pad_array), axis=1)
+        elif direction == 'top':
+            new_img = np.concatenate((pad_array, img_np), axis=0)
+        else:  # bottom
+            new_img = np.concatenate((img_np, pad_array), axis=0)
+
+        if c == 1:
+            new_img = new_img[:, :, 0]  # Remove channel axis for grayscale
+
+        padded_img = Image.fromarray(new_img, mode=mode)
+
+         # Adjust bounding boxes
+        if target is not None and "boxes" in target:
+            boxes = target["boxes"]
+            if isinstance(boxes, torch.Tensor):
+                boxes = boxes.clone()
+            else:
+                boxes = torch.tensor(boxes).clone()
+
+            if direction == 'left':
+                boxes[:, [0, 2]] += n_cols
+            elif direction == 'right':
+                pass  # no shift needed
+            elif direction == 'top':
+                boxes[:, [1, 3]] += n_cols
+            elif direction == 'bottom':
+                pass  # no shift needed
+
+            target["boxes"] = boxes
+
+        #return resize(padded_img, target, self.size)
+        return padded_img, target
+
+    def __repr__(self):
+        return (f"{self.__class__.__name__}(min_cols={self.min_cols}, "
+                f"max_cols={self.max_cols}, size={self.size}, p={self.p})")
+    
+
+
+
+class SparseColorNoise(object):
+    """
+    Randomly modifies up to `max_pct` percent of pixels in an image,
+    distributing them as far apart as possible.
+    """
+
+    def __init__(self, max_pct: float = 0.05, p : float = 0.3):
+        assert 0.0 < max_pct <= 1.0, 'max_pct must be between 0 and 1'
+        self.max_pct = max_pct
+        self.p = p
+
+
+    def __call__(self, img: Image.Image, target):
+        if random.random() > self.p:
+            return img, target
+
+        img_np = np.array(img)
+        h, w = img_np.shape[:2]
+        num_pixels = h * w
+        num_changes = int(num_pixels * self.max_pct)
+
+        if num_changes == 0:
+            return img, target
+
+        # Generate unique random indices
+        flat_indices = np.random.choice(num_pixels, size=num_changes, replace=False)
+        ys, xs = np.unravel_index(flat_indices, (h, w))
+
+        # Generate random RGB or grayscale values
+        if img.mode == 'RGB':
+            random_colors = np.random.randint(0, 256, size=(num_changes, 3), dtype=np.uint8)
+            img_np[ys, xs] = random_colors
+        elif img.mode == 'L':
+            random_colors = np.random.randint(0, 256, size=num_changes, dtype=np.uint8)
+            img_np[ys, xs] = random_colors
+        else:
+            raise ValueError(f"Unsupported image mode: {img.mode}")
+
+        return Image.fromarray(img_np, mode=img.mode), target
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(max_pct={self.max_pct})"
+    
+
+class RandomGrayscale(object):
+    def __init__(self, p=0.3):
+        assert 0.0 < p <= 1.0, 'p must be between 0 and 1'
+        self.p = p
+        self.grayscale_transform = T.RandomGrayscale(p)  # always convert if called
+
+    def __call__(self, image, target):  
+        return self.grayscale_transform(image), target
+    
+
+class RandomAdjustSharpness(object):
+    def __init__(self, sharpness_factor=2, p=0.3):
+        assert 0.0 < p <= 1.0, 'p must be between 0 and 1'
+        self.p = p
+        self.sharpness_factor = sharpness_factor
+        self.sharpness_transform = T.RandomAdjustSharpness(sharpness_factor, p)  # always convert if called
+
+    def __call__(self, image, target):
+        return self.sharpness_transform(image), target
+
+
+class RandomAdjustSharpness:
+    def __init__(self, sharpness_factor=2, p=0.3):
+        assert 0.0 < p <= 1.0, 'p must be between 0 and 1'
+        self.p = p
+        self.sharpness_factor = sharpness_factor
+        self.transform = T.RandomAdjustSharpness(sharpness_factor, p=1.0)  # apply always when called
+
+    def __call__(self, image, target):
+        if random.random() > self.p:
+            return image, target
+        return self.transform(image), target
+
+
+class RandomGaussianBlur:
+    def __init__(self, kernel_size=(3, 3), sigma=(0.1, 2.0), p=0.3):
+        assert 0.0 < p <= 1.0, 'p must be between 0 and 1'
+        self.p = p
+        self.kernel_size = kernel_size
+        self.sigma = sigma
+        self.transform = T.GaussianBlur(kernel_size, sigma=sigma)
+
+    def __call__(self, image, target):
+        if random.random() > self.p:
+            return image, target
+        return self.transform(image), target
+
+
+class RandomColorJitter:
+    def __init__(self, brightness=0, contrast=0, saturation=0, hue=0, p=0.3):
+        assert 0.0 < p <= 1.0, 'p must be between 0 and 1'
+        self.p = p
+        self.transform = T.ColorJitter(brightness=brightness, contrast=contrast, saturation=saturation, hue=hue)
+
+    def __call__(self, image, target):
+        if random.random() > self.p:
+            return image, target
+        return self.transform(image), target
+
+
+class RandomAutocontrast:
+    def __init__(self, p=0.3):
+        assert 0.0 < p <= 1.0, 'p must be between 0 and 1'
+        self.p = p
+        self.transform = T.RandomAutocontrast(p=1.0)  # torchvision accepts p here, but to be safe handle manually
+
+    def __call__(self, image, target):
+        return self.transform(image), target

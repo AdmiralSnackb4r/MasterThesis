@@ -24,7 +24,7 @@ class RelTR(nn.Module):
 
         self.entity_embed = nn.Embedding(num_entites, hidden_dim*2)
 
-        self.entity_class_embed = nn.Linear(hidden_dim, num_classes+1)
+        self.entity_class_embed = nn.Linear(hidden_dim, num_classes + 1)
         self.entity_bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
 
 
@@ -59,7 +59,7 @@ class RelTR(nn.Module):
     
 
 def custom_build(args):
-    num_classes = 16
+    num_classes = 11
     num_rel_classes = 51
 
     device = torch.device(args.device)
