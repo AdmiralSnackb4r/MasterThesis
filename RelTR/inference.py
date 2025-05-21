@@ -173,6 +173,7 @@ def check_frozen_weights_integrity(model, checkpoint_path, atol=1e-5, rtol=1e-5)
             model_param = current_state_dict[name]
             if torch.allclose(model_param, ckpt_param, atol=atol, rtol=rtol):
                 matched.append(name)
+                print(f"[MATCH] {name} -- Values accurate")
             else:
                 mismatched.append(name)
                 print(f"[MISMATCH] {name} - Values differ.")
@@ -321,12 +322,12 @@ def main(args):
 
     model, _, _ = build_model(args)
     ckpt = torch.load(args.resume, weights_only=False)
-    #result = check_frozen_weights_integrity(model, 'ckpt\\run_first_part\\checkpoint0248_.pth')
+    result = check_frozen_weights_integrity(model, 'ckpt\\run_first_part\\checkpoint0248_.pth')
     #ckpt = merge_model(full_model='ckpt\\run_full_freezed\\checkpoint0089.pth', first_part='ckpt\\run_first_part\\checkpoint0248_.pth')
     state_dict = ckpt['model'] if 'model' in ckpt else ckpt
 
-    #print(result)
-    #exit()
+    print(result)
+    exit()
 
 # Count number of parameters
     total_params = sum(v.numel() for v in state_dict.values())

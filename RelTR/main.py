@@ -58,7 +58,7 @@ def get_args_parser():
                         help="Dropout applied in the transformer")
     parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_entities', default=100, type=int,
+    parser.add_argument('--num_entities', default=300, type=int,
                         help="Number of query slots")
     parser.add_argument('--num_triplets', default=200, type=int,
                         help="Number of query slots")
@@ -110,76 +110,77 @@ def get_args_parser():
                         help="Return the fpn if there is the tag")
     return parser
 
-def initialize_and_freeze(model, first_part_checkpoint_path):
-    checkpoint = torch.load(first_part_checkpoint_path, map_location='cpu', weights_only = False)
+
+def freeze_module(module):
+    for param in module.parameters():
+        param.requires_grad = False
+
+def eval_module(module):
+    if hasattr(module, 'eval'):
+        module.eval()
+
+def freeze_backbone_and_entity_decoder(model, N):
+    # Freeze backbone
+    freeze_module(model.backbone)
+
+    # Freeze first N decoder layers' entity-specific submodules
+    for i in range(N):
+        layer = model.transformer.decoder.layers[i]
+        entity_modules = [
+            layer.self_attn_entity,
+            layer.cross_attn_entity,
+            layer.norm1_entity,
+            layer.norm2_entity,
+            layer.norm3_entity,
+            layer.linear1_entity,
+            layer.linear2_entity,
+        ]
+        for module in entity_modules:
+            freeze_module(module)
+            eval_module(module)
+
+def init_weights(m):
+    if isinstance(m, (nn.Linear, nn.Conv2d)):
+        if m.weight.requires_grad:
+            init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+        if m.bias is not None and m.bias.requires_grad:
+            init.constant_(m.bias, 0)
+    elif isinstance(m, nn.LayerNorm):
+        if m.weight.requires_grad:
+            init.constant_(m.weight, 1.0)
+        if m.bias.requires_grad:
+            init.constant_(m.bias, 0)
+
+def initialize_and_freeze(model, first_part_checkpoint_path, freeze_entity_layers=4):
+    # Load checkpoint
+    checkpoint = torch.load(first_part_checkpoint_path, map_location='cpu', weights_only=False)
     pretrained_state_dict = checkpoint['model']
 
-    cleaned_state_dict = {}
-    for k, v in pretrained_state_dict.items():
-        new_key = k.replace('module.', '') if k.startswith('module.') else k
-        cleaned_state_dict[new_key] = v
+    # Clean state dict keys
+    cleaned_state_dict = {k.replace('module.', ''): v for k, v in pretrained_state_dict.items()}
 
+    # Load weights with relaxed constraints
     model.load_state_dict(cleaned_state_dict, strict=False)
 
+    # Freeze all loaded parameters
     for name, param in model.named_parameters():
-        if name in cleaned_state_dict:
-            param.requires_grad = False
-        else:
-            param.requires_grad = True
+        param.requires_grad = not name in cleaned_state_dict
 
-    def init_weights(m):
-        if isinstance(m, (nn.Linear, nn.Conv2d)):
-            if m.weight.requires_grad:
-                init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            if m.bias is not None and m.bias.requires_grad:
-                init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            if m.bias.requires_grad:
-                init.constant_(m.bias, 0)
-            if m.weight.requires_grad:
-                init.constant_(m.weight, 1.0)
+    # Explicitly freeze encoder and backbone
+    freeze_module(model.transformer.encoder)
+    freeze_module(model.backbone)
 
-    model.apply(init_weights)
+    # Freeze selected entity-specific decoder layers
+    freeze_backbone_and_entity_decoder(model, freeze_entity_layers)
 
-    # sent parts into eval to really freeze them
+    # Set fixed modules to eval
     model.transformer.encoder.eval()
     model.backbone.eval()
-
-    model.transformer.decoder.layers[0].self_attn_entity.eval()
-    model.transformer.decoder.layers[0].cross_attn_entity.eval()
-    model.transformer.decoder.layers[0].norm1_entity.eval()
-    model.transformer.decoder.layers[0].norm2_entity.eval()
-    model.transformer.decoder.layers[0].linear1_entity.eval()
-    model.transformer.decoder.layers[0].linear2_entity.eval()
-    model.transformer.decoder.layers[0].norm3_entity.eval()
-
-    model.transformer.decoder.layers[1].self_attn_entity.eval()
-    model.transformer.decoder.layers[1].cross_attn_entity.eval()
-    model.transformer.decoder.layers[1].norm1_entity.eval()
-    model.transformer.decoder.layers[1].norm2_entity.eval()
-    model.transformer.decoder.layers[1].linear1_entity.eval()
-    model.transformer.decoder.layers[1].linear2_entity.eval()
-    model.transformer.decoder.layers[1].norm3_entity.eval()
-
-    model.transformer.decoder.layers[2].self_attn_entity.eval()
-    model.transformer.decoder.layers[2].cross_attn_entity.eval()
-    model.transformer.decoder.layers[2].norm1_entity.eval()
-    model.transformer.decoder.layers[2].norm2_entity.eval()
-    model.transformer.decoder.layers[2].linear1_entity.eval()
-    model.transformer.decoder.layers[2].linear2_entity.eval()
-    model.transformer.decoder.layers[2].norm3_entity.eval()
-
-    model.transformer.decoder.layers[3].self_attn_entity.eval()
-    model.transformer.decoder.layers[3].cross_attn_entity.eval()
-    model.transformer.decoder.layers[3].norm1_entity.eval()
-    model.transformer.decoder.layers[3].norm2_entity.eval()
-    model.transformer.decoder.layers[3].linear1_entity.eval()
-    model.transformer.decoder.layers[3].linear2_entity.eval()
-    model.transformer.decoder.layers[3].norm3_entity.eval()
-
     model.entity_class_embed.eval()
     model.entity_bbox_embed.eval()
 
+    # Reinitialize task-specific layers
+    model.apply(init_weights)
 
     return model
 
@@ -192,17 +193,24 @@ def make_transforms(image_set):
     scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
 
     if image_set == 'train':
-        return T.Compose([
-            T.RandomHorizontalFlip(),
-            T.RandomSelect(
-                T.RandomResize(scales, max_size=1333),
-                T.Compose([
-                    T.RandomResize([400, 500, 600]),
-                    #T.RandomSizeCrop(384, 600), # TODO: cropping causes that some boxes are dropped then no tensor in the relation part! What should we do?
+            return T.Compose([
+                #T.RandomHorizontalFlip(), Contradict ground-truth labels
+                T.SparseColorNoise(),
+                T.RandomColorColumnsPadding(1, 120, (1080, 1920)),
+                T.RandomGrayscale(0.3),
+                T.RandomSelect(
                     T.RandomResize(scales, max_size=1333),
-                ])
-            ),
-            normalize])
+                    T.Compose([
+                        T.RandomAdjustSharpness(),
+                        T.RandomGaussianBlur(),
+                        T.RandomColorJitter(),
+                        T.RandomAutocontrast(),
+                        T.RandomResize([400, 500, 600]),
+                        #T.RandomSizeCrop(384, 600), # TODO: cropping causes that some boxes are dropped then no tensor in the relation part! What should we do?
+                        T.RandomResize(scales, max_size=1333),
+                    ])
+                ),
+                normalize])
 
     if image_set == 'val':
         return T.Compose([
