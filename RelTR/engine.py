@@ -17,75 +17,51 @@ from util.box_ops import rescale_bboxes
 from lib.evaluation.sg_eval import BasicSceneGraphEvaluator, calculate_mR_from_evaluator_list
 from lib.openimages_evaluation import task_evaluation_sg
 
-def model_to_freeze(model):
+def model_to_freeze(model, freeze_entity_layers=6):
+    def unwrap_model(m):
+        return m.module if hasattr(m, "module") else m
 
-    def unwrap_model(model):
-        return model.module if hasattr(model, "module") else model
+    model = unwrap_model(model)
 
-    # sent parts into eval to really freeze them
-    unwrap_model(model).transformer.encoder.eval()
-    unwrap_model(model).backbone.eval()
+    # Set encoder and backbone to eval
+    model.transformer.encoder.eval()
+    model.backbone.eval()
 
-    unwrap_model(model).transformer.decoder.layers[0].self_attn_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[0].cross_attn_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[0].norm1_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[0].norm2_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[0].linear1_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[0].linear2_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[0].norm3_entity.eval()
+    # Set decoder entity-specific submodules to eval
+    for i in range(freeze_entity_layers):
+        layer = model.transformer.decoder.layers[i]
+        entity_modules = [
+            layer.self_attn_entity,
+            layer.cross_attn_entity,
+            layer.norm1_entity,
+            layer.norm2_entity,
+            layer.linear1_entity,
+            layer.linear2_entity,
+            layer.norm3_entity,
+        ]
+        for module in entity_modules:
+            module.eval()
 
-    unwrap_model(model).transformer.decoder.layers[1].self_attn_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[1].cross_attn_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[1].norm1_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[1].norm2_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[1].linear1_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[1].linear2_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[1].norm3_entity.eval()
+    # Set entity head modules to eval
+    model.entity_class_embed.eval()
+    model.entity_bbox_embed.eval()
 
-    unwrap_model(model).transformer.decoder.layers[2].self_attn_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[2].cross_attn_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[2].norm1_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[2].norm2_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[2].linear1_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[2].linear2_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[2].norm3_entity.eval()
-
-    unwrap_model(model).transformer.decoder.layers[3].self_attn_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[3].cross_attn_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[3].norm1_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[3].norm2_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[3].linear1_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[3].linear2_entity.eval()
-    unwrap_model(model).transformer.decoder.layers[3].norm3_entity.eval()
-
-    unwrap_model(model).entity_class_embed.eval()
-    unwrap_model(model).entity_bbox_embed.eval()
     return model
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0):
     model.train()
-    #model = model_to_freeze(model)
+    model = model_to_freeze(model_to_freeze, 6)
     criterion.train()
-    # metric_logger = utils.MetricLogger(delimiter="  ")
-    # metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
-    # metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    # metric_logger.add_meter('sub_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    # metric_logger.add_meter('obj_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    # metric_logger.add_meter('rel_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-
-    header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 500
 
     stats = {
-        'loss' : [],
-        'class_error' : [],
-        'loss_bbox' : [],
-        'sub_error' : [],
+        'loss': [],
+        'class_error': [],
+        'loss_bbox': [],
+        'sub_error': [],
         'obj_error': [],
-        'rel_error' : []
-
+        'rel_error': []
     }
 
     for samples, targets in data_loader:
@@ -95,87 +71,51 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         outputs = model(samples)
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
-        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
 
-        # reduce losses over all GPUs for logging purposes
+        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict if k in weight_dict)
+
+        # Logging-safe loss
         loss_dict_reduced = utils.reduce_dict(loss_dict)
-        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
-                                      for k, v in loss_dict_reduced.items()}
-        loss_dict_reduced_scaled = {k: v * weight_dict[k]
-                                    for k, v in loss_dict_reduced.items() if k in weight_dict}
-        losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
-
-        loss_value = losses_reduced_scaled.item()
+        loss_dict_scaled = {k: v * weight_dict[k] for k, v in loss_dict_reduced.items() if k in weight_dict}
+        loss_value = sum(loss_dict_scaled.values()).item()
 
         if not math.isfinite(loss_value):
-            print("Loss is {}, stopping training".format(loss_value))
+            print(f"Loss is {loss_value}, stopping training.")
             print(loss_dict_reduced)
             sys.exit(1)
 
         optimizer.zero_grad(set_to_none=True)
         losses.backward()
+
         if max_norm > 0:
             trainable_params = [p for p in model.parameters() if p.requires_grad and p.grad is not None]
             torch.nn.utils.clip_grad_norm_(trainable_params, max_norm)
+
         optimizer.step()
 
+        # Collect stats
         stats['loss'].append(loss_value)
-        stats['class_error'].append(loss_dict_reduced.get('class_error'))
-        stats['sub_error'].append(loss_dict_reduced.get('sub_error'))
-        stats['loss_bbox'].append(loss_dict_reduced.get('loss_bbox'))
-        stats['obj_error'].append(loss_dict_reduced.get('obj_error'))
-        stats['rel_error'].append(loss_dict_reduced.get('rel_error'))
+        for key in ['class_error', 'sub_error', 'loss_bbox', 'obj_error', 'rel_error']:
+            stats[key].append(loss_dict_reduced.get(key))
 
-    # gather the stats from all processes
-    #metric_logger.synchronize_between_processes()
-    #print("Averaged stats:", metric_logger)
-
-    #return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
     return stats
+
 
 @torch.no_grad()
 def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, args):
     model.eval()
     criterion.eval()
 
-    # metric_logger = utils.MetricLogger(delimiter="  ")
-    # metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    # metric_logger.add_meter('sub_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    # metric_logger.add_meter('obj_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    # metric_logger.add_meter('rel_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
-    # header = 'Test:'
-
-    # initilize evaluator
-    # # TODO merge evaluation programs
-    # if args.dataset == 'vg':
-    #     evaluator = BasicSceneGraphEvaluator.all_modes(multiple_preds=False)
-    #     if args.eval:
-    #         evaluator_list = []
-    #         for index, name in enumerate(data_loader.dataset.rel_categories):
-    #             if index == 0:
-    #                 continue
-    #             evaluator_list.append((index, name, BasicSceneGraphEvaluator.all_modes()))
-    #     else:
-    #         evaluator_list = None
-    # else:
-    #     all_results = []
-
-    #iou_types = tuple(k for k in ('segm', 'bbox') if k in postprocessors.keys())
-    #coco_evaluator = CocoEvaluator(base_ds, iou_types)
-    #all_results = []
-
     stats = {
-        'loss' : [],
-        'class_error' : [],
-        'loss_bbox' : [],
-        'sub_error' : [],
+        'loss': [],
+        'class_error': [],
+        'loss_bbox': [],
+        'sub_error': [],
         'obj_error': [],
-        'rel_error' : []
-
+        'rel_error': []
     }
 
     for samples, targets in data_loader:
-
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
@@ -183,48 +123,22 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, arg
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
 
-        # reduce losses over all GPUs for logging purposes
         loss_dict_reduced = utils.reduce_dict(loss_dict)
-        loss_dict_reduced_scaled = {k: v * weight_dict[k]
-                                    for k, v in loss_dict_reduced.items() if k in weight_dict}
-        loss_dict_reduced_unscaled = {f'{k}_unscaled': v
-                                      for k, v in loss_dict_reduced.items()}
-        losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
-        losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
+        loss_dict_scaled = {k: v * weight_dict[k] for k, v in loss_dict_reduced.items() if k in weight_dict}
+        loss_value = sum(loss_dict_scaled.values()).item()
 
-        stats['loss'].append(losses_reduced_scaled.item())
-        stats['class_error'].append(loss_dict_reduced.get('class_error'))
-        stats['sub_error'].append(loss_dict_reduced.get('sub_error'))
-        stats['loss_bbox'].append(loss_dict_reduced.get('loss_bbox'))
-        stats['obj_error'].append(loss_dict_reduced.get('obj_error'))
-        stats['rel_error'].append(loss_dict_reduced.get('rel_error'))
-        
-        #evaluate_rel_batch_oi(outputs, targets, all_results)
+        # Record stats
+        stats['loss'].append(loss_value)
+        for key in ['class_error', 'sub_error', 'loss_bbox', 'obj_error', 'rel_error']:
+            stats[key].append(loss_dict_reduced.get(key))
 
+        # Convert outputs to final predictions
         orig_target_sizes = torch.stack([t["orig_size"] for t in targets], dim=0)
         results = postprocessors['bbox'](outputs, orig_target_sizes)
 
-        #res = {target['image_id'].item(): output for target, output in zip(targets, results)}
-        #if coco_evaluator is not None:
-        #    coco_evaluator.update(res)
+        # Optional: COCO or custom evaluator logic can go here
 
-        #task_evaluation_sg.eval_rel_results(all_results, 100, do_val=True, do_vis=False)
-
-    # gather the stats from all processes
-    #if coco_evaluator is not None:
-    #    coco_evaluator.synchronize_between_processes()
-
-    # accumulate predictions from all images
-    #if coco_evaluator is not None:
-    #    coco_evaluator.accumulate()
-    #    coco_evaluator.summarize()
-
-    #stats = {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-    #if coco_evaluator is not None:
-    #    if 'bbox' in postprocessors.keys():
-    #        stats['coco_eval_bbox'] = coco_evaluator.coco_eval['bbox'].stats.tolist()
-
-    return stats#, coco_evaluator
+    return stats
 
 def evaluate_rel_batch(outputs, targets, evaluator, evaluator_list):
     for batch, target in enumerate(targets):
