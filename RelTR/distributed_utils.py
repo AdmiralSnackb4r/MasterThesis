@@ -2,6 +2,7 @@ import os
 import functools
 
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 def setup():
 
@@ -46,3 +47,42 @@ def save0(*args, **kwargs):
     # processes at the same time.
     if is_root_process():
         torch.save(*args, **kwargs)
+
+def create_writer(log_dir):
+    writer = None
+    if is_root_process():
+        writer = SummaryWriter(log_dir)
+    return writer
+
+def add_stats(writer, train_stats, eval_stats, epoch):
+    if is_root_process():
+        writer.add_scalar('Train/Loss', sum(train_stats['loss']) / len(train_stats['loss']), epoch)
+        writer.add_scalar('Train/Class Error', sum(train_stats['class_error']) / len(train_stats['class_error']), epoch)
+        writer.add_scalar('Train/BBox Error', sum(train_stats['loss_bbox']) / len(train_stats['loss_bbox']), epoch)
+
+        writer.add_scalar('Val/Loss', sum(eval_stats['loss']) / len(eval_stats['loss']), epoch)
+        writer.add_scalar('Val/Class Error', sum(eval_stats['class_error']) / len(eval_stats['class_error']), epoch)
+        writer.add_scalar('Val/BBox Error', sum(eval_stats['loss_bbox']) / len(eval_stats['loss_bbox']), epoch)
+
+def add_all_stats(writer, train_stats, eval_stats, epoch):
+    if is_root_process():
+        writer.add_scalar('Train/Loss', sum(train_stats['loss']) / len(train_stats['loss']), epoch)
+        writer.add_scalar('Train/Class Error', sum(train_stats['class_error']) / len(train_stats['class_error']), epoch)
+        writer.add_scalar('Train/BBox Error', sum(train_stats['loss_bbox']) / len(train_stats['loss_bbox']), epoch)
+        writer.add_scalar('Train/Sub Error', sum(train_stats['sub_error']) / len(train_stats['sub_error']), epoch)
+        writer.add_scalar('Train/Obj Error', sum(train_stats['obj_error']) / len(train_stats['obj_error']), epoch)
+        writer.add_scalar('Train/Rel Error', sum(train_stats['rel_error']) / len(train_stats['rel_error']), epoch)
+
+
+        writer.add_scalar('Val/Loss', sum(eval_stats['loss']) / len(eval_stats['loss']), epoch)
+        writer.add_scalar('Val/Class Error', sum(eval_stats['class_error']) / len(eval_stats['class_error']), epoch)
+        writer.add_scalar('Val/BBox Error', sum(eval_stats['loss_bbox']) / len(eval_stats['loss_bbox']), epoch)
+        writer.add_scalar('Val/Sub Error', sum(eval_stats['sub_error']) / len(eval_stats['sub_error']), epoch)
+        writer.add_scalar('Val/Obj Error', sum(eval_stats['obj_error']) / len(eval_stats['obj_error']), epoch)
+        writer.add_scalar('Val/Rel Error', sum(eval_stats['rel_error']) / len(eval_stats['rel_error']), epoch)
+
+
+
+def close_writer(writer):
+    if is_root_process():
+        writer.close()
