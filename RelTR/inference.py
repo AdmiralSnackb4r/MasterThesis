@@ -21,15 +21,17 @@ def get_args_parser():
     parser.add_argument('--dataset', default='vg')
 
     # image path
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000831_leftImg8bit.png',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000103_leftImg8bit.png',
     #                      help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\DynamicObjectCrossing_1_3\\rgb\\filtered\\00048940.png',
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\DynamicObjectCrossing_1_3\\rgb\\filtered\\00048826.png',
     #                     help="Path of the test image")
     # parser.add_argument('--img_path', type=str, default='demo/cat.jpg',
     #                     help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\test\\d6f2e089-8a310d73.jpg',
-                         help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\test\\d1b624d3-00000000.jpg',
+    #                     help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
+                          help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\Mappillary\\testing\\images\\2Q26fiACxC52F2K9jRUrMg.jpg',
     #                      help="Path of the test image")
 
     # * Backbone
@@ -41,9 +43,9 @@ def get_args_parser():
                         help="Type of positional embedding to use on top of the image features")
 
     # * Transformer
-    parser.add_argument('--enc_layers', default=4, type=int,
+    parser.add_argument('--enc_layers', default=6, type=int,
                         help="Number of encoding layers in the transformer")
-    parser.add_argument('--dec_layers', default=4, type=int,
+    parser.add_argument('--dec_layers', default=6, type=int,
                         help="Number of decoding layers in the transformer")
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
@@ -51,9 +53,9 @@ def get_args_parser():
                         help="Size of the embeddings (dimension of the transformer)")
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
-    parser.add_argument('--nheads', default=4, type=int,
+    parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_entities', default=100, type=int,
+    parser.add_argument('--num_entities', default=300, type=int,
                         help="Number of query slots")
     parser.add_argument('--num_triplets', default=200, type=int,
                         help="Number of query slots")
@@ -65,7 +67,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_freezed\\checkpoint0199.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint0299.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -322,12 +324,12 @@ def main(args):
 
     model, _, _ = build_model(args)
     ckpt = torch.load(args.resume, weights_only=False)
-    result = check_frozen_weights_integrity(model, 'ckpt\\run_first_part\\checkpoint0248_.pth')
+    #result = check_frozen_weights_integrity(model, 'ckpt\\run_first_part\\checkpoint0248_.pth')
     #ckpt = merge_model(full_model='ckpt\\run_full_freezed\\checkpoint0089.pth', first_part='ckpt\\run_first_part\\checkpoint0248_.pth')
     state_dict = ckpt['model'] if 'model' in ckpt else ckpt
 
-    print(result)
-    exit()
+    #print(result)
+    #exit()
 
 # Count number of parameters
     total_params = sum(v.numel() for v in state_dict.values())
@@ -361,14 +363,14 @@ def main(args):
     labels_entity = probas_entity_kept.argmax(dim=1)
 
     # Select top-k confident entities
-    topk = 100
+    topk = 25
     keep_queries_entity = torch.nonzero(keep_entity, as_tuple=True)[0]
     indices_entity = torch.argsort(-probas_entity_kept.max(-1)[0])[:topk]
     keep_queries_entity = keep_queries_entity[indices_entity]
 
     # Keep relation queries with confidence > 0.5 in all three logits
-    keep = torch.logical_and(probas.max(-1).values > 0.3,
-            torch.logical_and(probas_sub.max(-1).values > 0.3, probas_obj.max(-1).values > 0.3))
+    keep = torch.logical_or(probas.max(-1).values > 0.5,
+            torch.logical_or(probas_sub.max(-1).values > 0.5, probas_obj.max(-1).values > 0.5))
 
     # Filter labels and boxes for subjects and objects accordingly
     labels_sub = probas_sub[keep].argmax(dim=1)
@@ -378,14 +380,14 @@ def main(args):
     obj_bboxes_scaled = rescale_bboxes(outputs['obj_boxes'][0, keep], im.size)
 
     #Merge boxes based on labels (you need your merge_predictions updated accordingly)
-    sub_bboxes_scaled = merge_predictions(
-        bboxes_scaled, sub_bboxes_scaled, labels_entity, labels_sub)
+    #sub_bboxes_scaled = merge_predictions(
+    #    bboxes_scaled, sub_bboxes_scaled, labels_entity, labels_sub)#
 
-    obj_bboxes_scaled = merge_predictions(
-        bboxes_scaled, obj_bboxes_scaled, labels_entity, labels_obj)
+    #obj_bboxes_scaled = merge_predictions(
+    #    bboxes_scaled, obj_bboxes_scaled, labels_entity, labels_obj)
 
     # Select top 10 relation queries based on combined confidence score
-    topk = 25
+    topk = 10
     keep_queries = torch.nonzero(keep, as_tuple=True)[0]
     scores = probas[keep].max(-1)[0] * probas_sub[keep].max(-1)[0] * probas_obj[keep].max(-1)[0]
     indices = torch.argsort(-scores)[:topk]

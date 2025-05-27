@@ -73,6 +73,8 @@ class Transformer(nn.Module):
         memory_reshaped = memory.permute(1, 2, 0).contiguous()  # (batch_size, hidden_dim, H*W)
         memory_reshaped = memory_reshaped.view(bs, c, h, w)     # (batch_size, hidden_dim, H, W)
 
+        print(memory_reshaped.shape)
+
         # Aggregate across all channels (choose mean or max):
         aggregated_map = memory_reshaped[sample].mean(dim=0)  # Shape: (H, W)
         # alternatively: aggregated_map = memory_reshaped[sample].max(dim=0).values

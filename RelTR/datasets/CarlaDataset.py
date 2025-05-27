@@ -109,22 +109,73 @@ class Preprocess():
 
 
 class CarlaDataset(Dataset):
-    def __init__(self, root_dir, annotation_file, transforms=None, seg_ins_use=False):
-        self.root_dir = root_dir
-        self.annotation_file = annotation_file
+    def __init__(self, root_dir_carla, anno_carla, anno_real=None, root_dir_real=None,
+                transforms=None, seg_ins_use=False):
+        self.root_dir_carla = root_dir_carla
+        self.anno_carla = anno_carla
+        self.anno_real = anno_real
         self.seg_ins_use = seg_ins_use
+        self.root_dir_real = root_dir_real
         self.load_annotation()
         self.transforms = transforms
 
 
     
     def load_annotation(self):
-        with open(self.annotation_file, "r") as f:
-            self.dataset = json.load(f)
-        self.image_ids = list(self.dataset.keys())
+        with open(self.anno_carla, "r") as f:
+            self.dataset_carla = json.load(f)
+        self.image_ids_carla = list(self.dataset_carla.keys())
+
+        if self.anno_real:
+            with open(self.anno_real, "r") as f:
+                self.dataset_real = json.load(f)
+            self.real_images = self.dataset_real['images']
+            self.annotations_real = self.dataset_real['annotations']
+
+            # Index annotations by image_id
+            self.image_id_to_annotations = {}
+            for ann in self.annotations_real:
+                img_id = ann['image_id']
+                if img_id not in self.image_id_to_annotations:
+                    self.image_id_to_annotations[img_id] = []
+                self.image_id_to_annotations[img_id].append(ann)
+
+            # Optional: map file names to paths
+            self.id_to_filename = {img['id']: img['file_name'] for img in self.real_images}
+        else:
+            self.dataset_real = None
+            self.image_ids_real = []
         
     def __len__(self):
-        return len(self.dataset)
+        if not self.dataset_real:
+            return len(self.image_ids_carla)
+        # Ensure even interleaving
+        return 2 * max(len(self.image_ids_carla), len(self.real_images))
+    
+    def load_image(self, image_id):
+        if not self.seg_ins_use:
+            img_type = 'rgb'
+
+        match = re.match(r"^(.*?)(0\d+)", image_id)
+        folder_name = match.group(1).rstrip('_')
+        image_name = match.group(2)
+        filtered = "filtered"
+
+        if "augmented" in image_id:
+            top_lvl = '_aug'
+            folder_name = folder_name.split('_Aug')[0]
+            image_name = 'augmented_' + image_name
+            path = self.load_random_version(
+                root_dir=os.path.join(self.root_dir_carla, top_lvl),
+                folder_name=os.path.join(folder_name, filtered),
+                base_name=image_name
+            )
+        else:
+            top_lvl = '_out'
+            path = os.path.join(self.root_dir_carla, top_lvl, folder_name, img_type, filtered, image_name + ".png")
+
+        image = cv2.imread(path)
+        return Image.fromarray(image).convert("RGB")
     
     def load_random_version(self, root_dir, folder_name, base_name):
         pattern = os.path.join(root_dir, folder_name, f"{base_name}_*")
@@ -136,47 +187,150 @@ class CarlaDataset(Dataset):
         selected_path = random.choice(candidates)
         return selected_path
     
-    def __getitem__(self, index):
-        image_id = self.image_ids[index]
+    def parse_filename(self, filename):
 
-        if not self.seg_ins_use:
-            img_type = 'rgb'
+        if 'bdd' in filename:
+            parts = filename.split("_", 2)
+            if len(parts) < 3:
+                raise ValueError(f"Unexpected filename format: {filename}")
+            dataset = parts[0]
+            typo = parts[1]
+            img_name = parts[2]
+            return dataset, typo, img_name, None
+        elif 'city' in filename:
+            folder, filename = os.path.split(filename)
+    
+            # folder is like "city_test_aachen"
+            folder_parts = folder.split("_", 2)
+            if len(folder_parts) != 3:
+                raise ValueError(f"Unexpected folder structure: {folder}")
+            
+            dataset = folder_parts[0]        # "city"
+            typo = folder_parts[1]          # "test"
+            city = folder_parts[2]           # "aachen"
+            
+            # filename is like "aachen_000000_000019_leftImg8bit.png"
+            img_name = "_".join(filename.split("_")[1:])  # "000000_000019_leftImg8bit.png"
 
-        match = re.match(r"^(.*?)(0\d+)", image_id)
-        folder_name = match.group(1).rstrip('_')  # remove trailing underscore if needed
-        image_name = match.group(2)
-        filtered = "filtered"
-
-        if "augmented" in image_id:
-            top_lvl = '_aug'
-            folder_name = folder_name.split('_Aug')[0]
-            image_name = 'augmented_' + image_name
-
-            path = self.load_random_version(
-                root_dir=os.path.join(self.root_dir, top_lvl),
-                folder_name=os.path.join(folder_name, filtered),
-                base_name=image_name
-            )
-            image = cv2.imread(path)
-        else:
-            top_lvl = '_out'
-            image = cv2.imread(os.path.join(self.root_dir, top_lvl, folder_name, img_type, filtered, image_name + ".png"))
+            return dataset, typo, img_name, city
         
-        target = self.dataset[image_id]
-        #print(match)
-        image_id = torch.tensor([index])
+        elif 'mappilary' in filename:
+            parts = filename.split('_', 2)
+            if len(parts) < 3:
+                raise ValueError(f"Unexpected folder structure: {folder}")
+            dataset = parts[0]
+            typo = parts[1]
+            img_name = parts[2]
 
-        target = {
-            "labels" : torch.tensor(target['labels'], dtype=torch.long),
-            "boxes" : torch.tensor(target['boxes'], dtype=torch.float32),
-            "rel_annotations" : torch.tensor(target['rel_annotations'], dtype=torch.long),
-            "image_id" : image_id,
-            "orig_size" : torch.tensor((1920, 1080))
-        }
+            return dataset, typo, img_name, None
 
-        #print(target)
 
-        image = Image.fromarray(image)
+        elif 'carla' in filename:
+            parts = filename.split('_', 2)
+            dataset = parts[0]
+            typo = parts[1]
+            img_name = parts[2]
+            #print(parts)
+
+            return dataset, typo, img_name, None
+    
+    def parse_path(self, dataset, typo, img_name, city):
+
+        def strip_bdd_suffix(filename):
+            # This regex removes `_train_color`, `_val_color`, `_test_color` (before the extension)
+            name = re.sub(r'_(train|val|test)_color', '', filename)
+            # Replace .png with .jpg
+            return os.path.splitext(name)[0] + '.jpg'
+
+        if dataset == 'bdd':
+            image_path = os.path.join(self.root_dir_real, 'BDD100', 'bdd100k_images_10k', '10k', typo, strip_bdd_suffix(img_name))
+        elif dataset == 'city':
+            img_name = city + '_' + img_name
+            typo = 'val' if 'test' in typo else 'train'
+            image_path = os.path.join(self.root_dir_real, 'CityScapes', 'leftImg8bit', typo, city, img_name)
+        elif dataset == 'mappilary':
+            typo = 'validation' if 'val' in typo else 'training'
+            image_path = os.path.join(self.root_dir_real, 'Mappilary', typo, 'images', img_name) 
+        elif dataset == 'carla':
+            filtered = 'filtered'
+            if 'augmented' in img_name:
+                top_lvl = '_aug'
+                folder_nr, rest = img_name.split('_Aug', 1)
+                folder = typo + '_' + folder_nr
+                rest_parts = rest.lstrip('_').split('_')
+                image_name_parts = []
+                for part in rest_parts:
+                    image_name_parts.append(part)
+                    if '.png' in part:
+                        break
+                image_name = '_'.join(image_name_parts)
+
+                image_path = os.path.join(self.root_dir_real, top_lvl, folder, filtered, image_name)
+            else:
+                top_lvl = '_out'
+                parts = img_name.split('_')
+                img_type = 'rgb'
+
+                for i in reversed(range(len(parts))):
+                    if parts[i].endswith('.png'):
+                        png_part = parts[i]
+                        break
+
+                # The image ID is the part just before the last suffix (remove .png)
+                image_id = parts[i - 1]
+                image_name = f"{image_id}.png"
+
+                # folder_nr is everything before the image ID
+                folder_nr = '_'.join(parts[:i - 1])
+                folder = typo + '_' + folder_nr
+
+                image_path = os.path.join(self.image_root, top_lvl, folder, img_type, filtered, image_name)
+                #print(dataset, typo, img_name)
+
+        return image_path
+    
+    def __getitem__(self, index):
+        use_real = self.dataset_real and index % 2 == 1
+
+        if use_real:
+            real_idx = (index // 2) % len(self.real_images)
+            image_info = self.real_images[real_idx]
+            image_id = image_info['id']
+            dataset, typo, image_name, city = self.parse_filename(image_info['file_name'])
+
+            image = Image.open(self.parse_path(dataset, typo, image_name, city)).convert("RGB")
+            annots = self.image_id_to_annotations.get(image_id, [])
+
+            boxes = []
+            labels = []
+
+            for ann in annots:
+                bbox = ann['bbox']  # COCO format: [x, y, width, height]
+                x, y, w, h = bbox
+                boxes.append([x, y, x + w, y + h])
+                labels.append(ann['category_id'])
+
+            target = {
+                "labels": torch.tensor(labels, dtype=torch.long),
+                "boxes": torch.tensor(boxes, dtype=torch.float32),
+                "rel_annotations":  torch.full((1, 2), -1, dtype=torch.long), #placeholder
+                "image_id": torch.tensor([index]),
+                "orig_size": torch.tensor((2048, 1024)),
+            }
+
+        else:
+            carla_idx = (index // 2) % len(self.image_ids_carla)
+            image_id = self.image_ids_carla[carla_idx]
+            target_data = self.dataset_carla[image_id]
+
+            image = self.load_image(image_id)
+            target = {
+                "labels": torch.tensor(target_data['labels'], dtype=torch.long),
+                "boxes": torch.tensor(target_data['boxes'], dtype=torch.float32),
+                "rel_annotations": torch.tensor(target_data['rel_annotations'], dtype=torch.long),
+                "image_id": torch.tensor([index]),
+                "orig_size": torch.tensor((1920, 1080)),
+            }
 
         if self.transforms:
             image, target = self.transforms(image, target)
