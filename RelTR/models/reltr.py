@@ -269,73 +269,92 @@ class SetCriterion(nn.Module):
            The target boxes are expected in format (center_x, center_y, w, h), normalized by the image size.
         """
         assert 'pred_boxes' in outputs
-        idx = self._get_src_permutation_idx(indices[0])
-        pred_boxes = outputs['pred_boxes'][idx]
+
+        idx_entity = self._get_src_permutation_idx(indices[0])
+        pred_boxes = outputs['pred_boxes'][idx_entity]
         target_entry_boxes = torch.cat([t['boxes'][i] for t, (_, i) in zip(targets, indices[0])], dim=0)
 
-        rel_idx = self._get_src_permutation_idx(indices[1])
-        target_rels_boxes = torch.cat([t['boxes'][t["rel_annotations"][i, 0]] for t, (_, i) in zip(targets, indices[1])], dim=0)
-        target_relo_boxes = torch.cat([t['boxes'][t["rel_annotations"][i, 1]] for t, (_, i) in zip(targets, indices[1])], dim=0)
-        rels_boxes = outputs['sub_boxes'][rel_idx]
-        relo_boxes = outputs['obj_boxes'][rel_idx]
+        has_valid_rels = indices[1] and any(
+            t["rel_annotations"].numel() > 0 and not torch.all(t["rel_annotations"] == -1)
+            for t in targets
+        )
+
+        if has_valid_rels:
+            idx_rel = self._get_src_permutation_idx(indices[1])
+            rels_boxes = outputs['sub_boxes'][idx_rel]
+            relo_boxes = outputs['obj_boxes'][idx_rel]
+
+            target_rels_boxes = torch.cat([
+                t['boxes'][t["rel_annotations"][i, 0]]
+                for t, (_, i) in zip(targets, indices[1])
+            ], dim=0)
+            target_relo_boxes = torch.cat([
+                t['boxes'][t["rel_annotations"][i, 1]]
+                for t, (_, i) in zip(targets, indices[1])
+            ], dim=0)
+        else:
+            # Avoid gradient updates when there are no valid relations
+            rels_boxes = relo_boxes = torch.zeros(0, 4, device=pred_boxes.device)
+            target_rels_boxes = target_relo_boxes = torch.zeros(0, 4, device=pred_boxes.device)
 
         src_boxes = torch.cat((pred_boxes, rels_boxes, relo_boxes), dim=0)
         target_boxes = torch.cat((target_entry_boxes, target_rels_boxes, target_relo_boxes), dim=0)
-        loss_bbox = F.l1_loss(src_boxes, target_boxes, reduction='none')
 
-        losses = {}
-        losses['loss_bbox'] = loss_bbox.sum() / num_boxes
+        losses = {
+            'loss_bbox': F.l1_loss(src_boxes, target_boxes, reduction='none').sum() / num_boxes,
+            'loss_giou': (1 - torch.diag(box_ops.generalized_box_iou(
+                box_ops.box_cxcywh_to_xyxy(src_boxes),
+                box_ops.box_cxcywh_to_xyxy(target_boxes)
+            ))).sum() / num_boxes
+        }
 
-        loss_giou = 1 - torch.diag(box_ops.generalized_box_iou(
-            box_ops.box_cxcywh_to_xyxy(src_boxes),
-            box_ops.box_cxcywh_to_xyxy(target_boxes)))
-        losses['loss_giou'] = loss_giou.sum() / num_boxes
         return losses
 
     def loss_relations(self, outputs, targets, indices, num_boxes, log=True):
-        """Compute the predicate classification loss
-        """
+        """Compute the predicate classification loss."""
         assert 'rel_logits' in outputs
 
         src_logits = outputs['rel_logits']
         idx = self._get_src_permutation_idx(indices[1])
-        target_classes_o = torch.cat([t["rel_annotations"][J,2] for t, (_, J) in zip(targets, indices[1])])
-        target_classes = torch.full(src_logits.shape[:2], self.num_rel_classes, dtype=torch.int64, device=src_logits.device)
+
+        if not indices[1] or all(
+            t["rel_annotations"].numel() == 0 or torch.all(t["rel_annotations"] == -1)
+            for t in targets
+        ):
+            # No valid relationships; return zero loss
+            return {
+                'loss_rel': torch.tensor(0.0, device=src_logits.device),
+                'rel_error': 0.0 if log else None
+            }
+
+        # Gather target relation labels
+        target_classes_o = torch.cat([
+            t["rel_annotations"][J, 2] for t, (_, J) in zip(targets, indices[1])
+        ], dim=0)
+
+        # Build the full target tensor filled with background class
+        target_classes = torch.full(
+            src_logits.shape[:2], self.num_rel_classes,
+            dtype=torch.int64, device=src_logits.device
+        )
         target_classes[idx] = target_classes_o
 
-        print("src_logits shape:", src_logits.shape)
-        print("target_classes_o:", target_classes_o)
-        print("Max label value:", target_classes_o.max())
-        print("Min label value:", target_classes_o.min())
-        print("Expected number of classes (n_classes):", src_logits.shape[-1])
-
-        print("idx:", idx)
-        print("src_logits[idx] shape:", src_logits[idx].shape)
-        print("target_classes_o shape:", target_classes_o.shape)
-
-        print("src_logits[idx] sample:", src_logits[idx][0])
-        print("src_logits[idx] min:", src_logits[idx].min(), "max:", src_logits[idx].max())
-
-        print("idx batch indices:", idx[0])
-        print("idx query indices:", idx[1])
-        print("target_classes_o:", target_classes_o)
-
-        print("Checking NaNs in logits:", torch.isnan(src_logits[idx]).any().item())
-        print("Checking NaNs in targets:", torch.isnan(target_classes_o).any().item())
-        print("Checking logits range:", src_logits[idx].min().item(), src_logits[idx].max().item())
-        print("Checking target_classes_o range:", target_classes_o.min().item(), target_classes_o.max().item())
-
-        print(target_classes_o.dtype)
-
+        # Check for invalid labels
         n_classes = src_logits.shape[-1]
         invalid = (target_classes_o < 0) | (target_classes_o >= n_classes)
-        print("Found invalid targets:", target_classes_o[invalid])
+        if invalid.any():
+            print("Found invalid targets:", target_classes_o[invalid])
 
-        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight_rel)
+        # Compute cross-entropy loss
+        loss_ce = F.cross_entropy(
+            src_logits.transpose(1, 2), target_classes, weight=self.empty_weight_rel
+        )
 
         losses = {'loss_rel': loss_ce}
         if log:
-            losses['rel_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
+            rel_error = 100 - accuracy(src_logits[idx], target_classes_o)[0]
+            losses['rel_error'] = rel_error
+
         return losses
 
     def _get_src_permutation_idx(self, indices):
@@ -351,9 +370,9 @@ class SetCriterion(nn.Module):
         return batch_idx, tgt_idx
 
     def get_loss(self, loss, outputs, targets, indices, num_boxes, **kwargs):
+
         loss_map = {
             'labels': self.loss_labels,
-            'cardinality': self.loss_cardinality,
             'boxes': self.loss_boxes,
             'relations': self.loss_relations
         }
@@ -374,7 +393,17 @@ class SetCriterion(nn.Module):
         self.indices = indices
 
         # Compute the average number of target boxes accross all nodes, for normalization purposes
-        num_boxes = sum(len(t["labels"])+len(t["rel_annotations"]) for t in targets)
+        num_boxes = 0
+        for t in targets:
+            num_boxes += len(t["labels"])
+            
+            # Only count rel_annotations if they contain at least one valid (non-placeholder) entry
+            if (
+                "rel_annotations" in t
+                and t["rel_annotations"].numel() > 0
+                and not torch.all(t["rel_annotations"] == -1)
+            ):
+                num_boxes += len(t["rel_annotations"])
         num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=next(iter(outputs.values())).device)
         if is_dist_avail_and_initialized():
             torch.distributed.all_reduce(num_boxes)

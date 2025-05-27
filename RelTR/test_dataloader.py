@@ -4,7 +4,7 @@ import torch
 import argparse
 from pathlib import Path
 import util.misc as utils
-from datasets import build_custom_dataset, build_carla_dataset
+from datasets import build_custom_dataset, build_carla_dataset, build_merged_dataset
 from torch.utils.data import DataLoader
 import torchvision.transforms.v2 as v2
 import datasets.transforms as T
@@ -77,7 +77,8 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--dataset', default='vg')
     parser.add_argument('--ann_path', default='./data/vg/', type=str)
-    parser.add_argument('--datapath', default='F:\\scenario_runner-0.9.15\\Data', type=str)
+    parser.add_argument('--datapath_carla', default='F:\\scenario_runner-0.9.15\\Data', type=str)
+    parser.add_argument('--datapath_real', default='S:\\Datasets', type=str)
 
 
     parser.add_argument('--output_dir', default='',
@@ -108,29 +109,29 @@ def main(args):
 
         normalize = T.Compose([
             T.ToTensor(),
-            T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            #T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
 
         scales = [480, 512, 544, 576, 608, 640, 672, 704, 736, 768, 800]
 
         if image_set == 'train':
             return T.Compose([
-                #T.RandomHorizontalFlip(), Contradict ground-truth labels
-                T.SparseColorNoise(),
-                T.RandomColorColumnsPadding(1, 120, (1080, 1920)),
-                T.RandomGrayscale(0.3),
-                T.RandomSelect(
-                    T.RandomResize(scales, max_size=1333),
-                    T.Compose([
-                        T.RandomAdjustSharpness(),
-                        T.RandomGaussianBlur(),
-                        T.RandomColorJitter(),
-                        T.RandomAutocontrast(),
-                        T.RandomResize([400, 500, 600]),
-                        #T.RandomSizeCrop(384, 600), # TODO: cropping causes that some boxes are dropped then no tensor in the relation part! What should we do?
-                        T.RandomResize(scales, max_size=1333),
-                    ])
-                ),
+                # #T.RandomHorizontalFlip(), Contradict ground-truth labels
+                # T.SparseColorNoise(),
+                # T.RandomColorColumnsPadding(1, 120, (1080, 1920)),
+                # T.RandomGrayscale(0.3),
+                # T.RandomSelect(
+                #     T.RandomResize(scales, max_size=1333),
+                #     T.Compose([
+                #         T.RandomAdjustSharpness(),
+                #         T.RandomGaussianBlur(),
+                #         T.RandomColorJitter(),
+                #         T.RandomAutocontrast(),
+                #         T.RandomResize([400, 500, 600]),
+                #         #T.RandomSizeCrop(384, 600), # TODO: cropping causes that some boxes are dropped then no tensor in the relation part! What should we do?
+                #         T.RandomResize(scales, max_size=1333),
+                #     ])
+                # ),
                 normalize])
 
         if image_set == 'val':
@@ -146,7 +147,7 @@ def main(args):
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)
-    test = build_carla_dataset(args=args, anno_file='datasets\\annotations\\Carla\\train_dataset_pre.json', transform=make_coco_transforms('train'))
+    test = build_carla_dataset(args=args, anno_carla='datasets\\annotations\\Carla\\train_dataset_pre.json', anno_real='datasets\\annotations\\Merged\\merged_train.json', transform=make_coco_transforms('train'))
     sampler = torch.utils.data.RandomSampler(test)
 
     batch_sampler = torch.utils.data.BatchSampler(
