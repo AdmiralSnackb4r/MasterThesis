@@ -92,7 +92,7 @@ def get_args_parser():
     parser.add_argument('--datapath_carla', default='/p/scratch/hai_1008/kromm3/Carla/Data', type=str)
     parser.add_argument('--datapath_real', default='/p/scratch/hai_1008/kromm3', type=str)
 
-    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_full_sim_real_sgd',
+    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_full_tandem',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
@@ -248,7 +248,7 @@ def main(args):
     
     model.to(device)
 
-    writer = create_writer(log_dir='/p/project/hai_1008/kromm3/RelTR/logs/run_full_sim_real_sgd')
+    writer = create_writer(log_dir='/p/project/hai_1008/kromm3/RelTR/logs/run_full_tandem')
 
     model_without_ddp = model
     if args.distributed:
@@ -347,6 +347,14 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             sampler_train.set_epoch(epoch)
+        
+        if epoch % 2 == 0:
+            dataset_train.use_real_now = False
+        else:
+            dataset_train.use_real_now = True
+
+        print(f"Doing without relationships : {dataset_train.use_real_now}")
+
         train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
         print0(f"Epoch: {epoch}")
         lr_scheduler.step()

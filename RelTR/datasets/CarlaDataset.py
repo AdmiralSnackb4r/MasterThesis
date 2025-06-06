@@ -118,6 +118,7 @@ class CarlaDataset(Dataset):
         self.root_dir_real = root_dir_real
         self.load_annotation()
         self.transforms = transforms
+        self.use_real_now = False
 
 
     
@@ -237,8 +238,9 @@ class CarlaDataset(Dataset):
     def parse_path(self, dataset, typo, img_name, city):
 
         def strip_bdd_suffix(filename):
+            name = re.sub(r'^(train|val|test)_', '', filename)
             # This regex removes `_train_color`, `_val_color`, `_test_color` (before the extension)
-            name = re.sub(r'_(train|val|test)_color', '', filename)
+            name = re.sub(r'_(train|val|test)_color', '', name)
             # Replace .png with .jpg
             return os.path.splitext(name)[0] + '.jpg'
 
@@ -290,7 +292,7 @@ class CarlaDataset(Dataset):
         return image_path
     
     def __getitem__(self, index):
-        use_real = self.dataset_real and index % 2 == 1
+        use_real = self.dataset_real and self.use_real_now
 
         if use_real:
             real_idx = (index // 2) % len(self.real_images)
@@ -310,10 +312,14 @@ class CarlaDataset(Dataset):
                 boxes.append([x, y, x + w, y + h])
                 labels.append(ann['category_id'])
 
+            if len(boxes) == 0:
+                index = random.randint(0, len(self.real_images) - 1)
+                return self.__getitem__(index)
+
             target = {
                 "labels": torch.tensor(labels, dtype=torch.long),
                 "boxes": torch.tensor(boxes, dtype=torch.float32),
-                "rel_annotations":  torch.full((1, 2), -1, dtype=torch.long), #placeholder
+                "rel_annotations":  torch.full((1, 3), -1, dtype=torch.long), #placeholder
                 "image_id": torch.tensor([index]),
                 "orig_size": torch.tensor((2048, 1024)),
             }

@@ -4,6 +4,7 @@ import json
 from PIL import Image
 import torch
 from torch.utils.data import Dataset
+import random
 
 
 class MergedCocoDataset(Dataset):
@@ -19,6 +20,9 @@ class MergedCocoDataset(Dataset):
         self.images = coco['images']
         self.annotations = coco['annotations']
         self.categories = {cat['id']: cat['name'] for cat in coco['categories']}
+        self.max_length = 0
+        self.average_length = 0
+        self.itter_counter = 0
 
         # Index annotations by image_id
         self.image_id_to_annotations = {}
@@ -84,8 +88,9 @@ class MergedCocoDataset(Dataset):
     def parse_path(self, dataset, typo, img_name, city):
 
         def strip_bdd_suffix(filename):
+            name = re.sub(r'^(train|val|test)_', '', filename)
             # This regex removes `_train_color`, `_val_color`, `_test_color` (before the extension)
-            name = re.sub(r'_(train|val|test)_color', '', filename)
+            name = re.sub(r'_(train|val|test)_color', '', name)
             # Replace .png with .jpg
             return os.path.splitext(name)[0] + '.jpg'
 
@@ -112,11 +117,12 @@ class MergedCocoDataset(Dataset):
                         break
                 image_name = '_'.join(image_name_parts)
 
-                image_path = os.path.join(self.image_root, top_lvl, folder, filtered, image_name)
+                image_path = os.path.join(self.image_root, 'Carla', 'Data', top_lvl, folder, filtered, image_name)
             else:
                 top_lvl = '_out'
                 parts = img_name.split('_')
                 img_type = 'rgb'
+
 
                 for i in reversed(range(len(parts))):
                     if parts[i].endswith('.png'):
@@ -131,18 +137,23 @@ class MergedCocoDataset(Dataset):
                 folder_nr = '_'.join(parts[:i - 1])
                 folder = typo + '_' + folder_nr
 
-                image_path = os.path.join(self.image_root, top_lvl, folder, img_type, filtered, image_name)
+                if folder == "NoSignalJunctionCrossing_":
+                    folder = "NoSignalJunctionCrossing"
+
+                image_path = os.path.join(self.image_root, 'Carla', 'Data',  top_lvl, folder, img_type, filtered, image_name)
                 #print(dataset, typo, img_name)
 
         return image_path
 
     def __getitem__(self, idx):
+        self.itter_counter += 1
         image_info = self.images[idx]
         image_id = image_info['id']
         dataset, typo, img_name, city = self.parse_filename(image_info['file_name'])
 
         image = Image.open(self.parse_path(dataset, typo, img_name, city)).convert("RGB")
         annots = self.image_id_to_annotations.get(image_id, [])
+        width, height = image.size
 
         boxes = []
         labels = []
@@ -153,6 +164,18 @@ class MergedCocoDataset(Dataset):
             boxes.append([x, y, x + w, y + h])
             labels.append(ann['category_id'])
 
+        if len(boxes) == 0:
+            index = random.randint(0, len(self.images) - 1)
+            return self.__getitem__(index)
+
+
+        if len(boxes) > self.max_length:
+            print("new max length found: ", len(boxes))
+            self.max_length = len(boxes)
+        self.average_length += len(boxes)
+        #print(f"length: {len(boxes)}")
+        #print(f"average length: {self.average_length/self.itter_counter}")
+        #print("len: ", len(boxes))
         boxes = torch.tensor(boxes, dtype=torch.float32)
         labels = torch.tensor(labels, dtype=torch.int64)
         image_id = torch.tensor([image_id])
@@ -161,7 +184,7 @@ class MergedCocoDataset(Dataset):
             'boxes': boxes,
             'labels': labels,
             'image_id': image_id,
-            'orig_size' : torch.tensor((2048, 1024))
+            'orig_size' : torch.tensor((width, height))
         }
 
         if self.transforms:
@@ -176,12 +199,12 @@ if __name__ == '__main__':
     import random
 
     dataset = MergedCocoDataset(
-    json_path="annotations/merged_train.json",
-    image_root="S:/Datasets/",  # Root folder to images
+    json_path="annotations/Merged/merged_with_carla_train.json",
+    image_root="/p/scratch/hai_1008/kromm3",  # Root folder to images
     transforms=None  # Or custom transform pipeline
     )
 
-    for idx in range(33037, len(dataset)):
+    for idx in range(len(dataset)):
         img, target = dataset[idx]
         print(idx)
 
