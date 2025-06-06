@@ -27,10 +27,10 @@ def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
-    parser.add_argument('--batch_size', default=2, type=int)
+    parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
-    parser.add_argument('--epochs', default=200, type=int)
-    parser.add_argument('--lr_drop', default=50, type=int)
+    parser.add_argument('--epochs', default=700, type=int)
+    parser.add_argument('--lr_drop', default=600, type=int)
     parser.add_argument('--clip_max_norm', default=0.1, type=float,
                         help='gradient clipping max norm')
 
@@ -89,13 +89,15 @@ def get_args_parser():
     parser.add_argument('--ann_path', default='./data/vg/', type=str)
     parser.add_argument('--img_folder', default='/home/cong/Dokumente/tmp/data/visualgenome/images/', type=str)
     parser.add_argument('--datapath', default='/p/scratch/hai_1008/kromm3/Carla/Data', type=str)
+    parser.add_argument('--datapath_carla', default='/p/scratch/hai_1008/kromm3/Carla/Data', type=str)
+    parser.add_argument('--datapath_real', default='/p/scratch/hai_1008/kromm3', type=str)
 
-    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_full_sim_1',
+    parser.add_argument('--output_dir', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_full_sim_real_sgd',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_full_sim_real_sgd/checkpoint0139.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
@@ -180,7 +182,8 @@ def initialize_and_freeze(model, first_part_checkpoint_path, freeze_entity_layer
     model.entity_bbox_embed.eval()
 
     # Reinitialize task-specific layers
-    model.apply(init_weights)
+    # uncommend if first training
+    #model.apply(init_weights)
 
     return model
 
@@ -236,14 +239,20 @@ def main(args):
     random.seed(seed)
 
     model, criterion, postprocessors = build_model(args)
-    model = initialize_and_freeze(model, first_part_checkpoint_path='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_first_part/checkpoint0248_.pth')
+
+
+    #model = initialize_and_freeze(model, first_part_checkpoint_path='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_first_part_with_sim/checkpoint0425_.pth')
+    #freeze_backbone_and_entity_decoder(model, 6)
+    #freeze_module(model.transformer.encoder)
+    #freeze_module(model.backbone)
+    
     model.to(device)
 
-    writer = create_writer(log_dir='/p/project/hai_1008/kromm3/RelTR/logs/run_full_sim_1')
+    writer = create_writer(log_dir='/p/project/hai_1008/kromm3/RelTR/logs/run_full_sim_real_sgd')
 
     model_without_ddp = model
     if args.distributed:
-         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
          model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     #print('number of params:', n_parameters)
@@ -255,20 +264,24 @@ def main(args):
             "lr": args.lr_backbone,
         },
     ]
-    optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
-                                  weight_decay=args.weight_decay)
+    #optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
+    #                               weight_decay=args.weight_decay)
+    optimizer = torch.optim.SGD(param_dicts, lr=args.lr, momentum=0.7, nesterov=True)
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
 
     #dataset_train = build_dataset(image_set='train', args=args)
     #dataset_val = build_dataset(image_set='val', args=args)
 
+
+
     dataset_train = build_carla_dataset(args,
-    anno_file="/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Carla/train_dataset_pre.json",
+    anno_carla="/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Carla/train_dataset_pre.json",
+    anno_real="/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Merged/merged_train.json",
     transform=make_transforms('train')  # Or custom transform pipeline
     )
 
     dataset_val = build_carla_dataset(args,
-    anno_file="/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Carla/test_dataset_pre.json",
+    anno_carla="/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Carla/test_dataset_pre.json",
     transform=make_transforms('val')  # Or custom transform pipeline
     )
 
@@ -294,22 +307,6 @@ def main(args):
         model_without_ddp.detr.load_state_dict(checkpoint['model'])
 
     output_dir = Path(args.output_dir)
-    if args.resume:
-         
-        #if args.distributed:
-        print0(f"Resume training with checkpoint {args.resume}")
-        checkpoint = torch.load(args.resume, map_location='cpu')
-
-        #state_dict = torch.load("checkpoint.pth")
-        from collections import OrderedDict
-        state_dict = checkpoint['model']
-        new_state_dict = OrderedDict()
-        for k, v in state_dict.items():
-            new_key = "module." + k  # Add 'module.' prefix
-            print(new_key)
-            new_state_dict[new_key] = v
-
-        model.load_state_dict(new_state_dict, strict=True)
 
         #model.load_state_dict(checkpoint['model'], strict=True)
         # else:
@@ -322,10 +319,28 @@ def main(args):
         #         new_state_dict[name] = v
         #     model.load_state_dict(new_state_dict, strict=True)
 
+    if args.resume:
+         
+        #if args.distributed:
+        print0(f"Resume training with checkpoint {args.resume}")
+        checkpoint = torch.load(args.resume, map_location='cpu')
+
+        #state_dict = torch.load("checkpoint.pth")
+        from collections import OrderedDict
+        state_dict = checkpoint['model']
+        new_state_dict = OrderedDict()
+        for k, v in state_dict.items():
+            new_key = "module." + k  # Add 'module.' prefix
+            #print(new_key)
+            new_state_dict[new_key] = v
+
+        model.load_state_dict(new_state_dict, strict=True)
+
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
                 args.start_epoch = checkpoint['epoch'] + 1
+
 
     print("Start training")
     start_time = time.time()
@@ -333,6 +348,7 @@ def main(args):
         if args.distributed:
             sampler_train.set_epoch(epoch)
         train_stats = train_one_epoch(model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
+        print0(f"Epoch: {epoch}")
         lr_scheduler.step()
         if args.output_dir:
             checkpoint_paths = [output_dir / 'checkpoint.pth'] # anti-crash
