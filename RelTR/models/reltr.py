@@ -33,7 +33,7 @@ class RelTR(nn.Module):
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
-        print("aux loss", aux_loss)
+        print("aux loss", self.aux_loss)
 
         self.entity_embed = nn.Embedding(num_entities, hidden_dim*2)
         self.triplet_embed = nn.Embedding(num_triplets, hidden_dim*3)
@@ -165,7 +165,7 @@ class RelTR(nn.Module):
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord, outputs_class_sub, outputs_coord_sub,
                                                     outputs_class_obj, outputs_coord_obj, outputs_class_rel)
-        return out, hs_sub, hs_obj
+        return out
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord, outputs_class_sub, outputs_coord_sub,
@@ -259,8 +259,6 @@ class SetCriterion(nn.Module):
 
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, reduction='none')
 
-        loss_weight = torch.cat((torch.ones(pred_logits.shape[:2]).to(pred_logits.device), indices[2]*0.5, indices[3]*0.5), dim=-1)
-        # TODO anders bestrafen?
         if has_valid_rels:
             loss_weight = torch.cat((torch.ones(pred_logits.shape[:2]).to(pred_logits.device), indices[2], indices[3]), dim=-1)
         else:
@@ -274,11 +272,16 @@ class SetCriterion(nn.Module):
         #if not has_valid_rels:
           #print(f"losses while placeholder at labels: {losses}")
 
-        if log and has_valid_rels:
-            # TODO this should probably be a separate loss, not hacked in this one here
+        if log:
             losses['class_error'] = 100 - accuracy(pred_logits[idx], target_classes_o)[0]
-            losses['sub_error'] = 100 - accuracy(sub_logits[rel_idx], target_rels_classes_o)[0]
-            losses['obj_error'] = 100 - accuracy(obj_logits[rel_idx], target_relo_classes_o)[0]
+            if has_valid_rels:
+                # TODO this should probably be a separate loss, not hacked in this one here
+                losses['sub_error'] = 100 - accuracy(sub_logits[rel_idx], target_rels_classes_o)[0]
+                losses['obj_error'] = 100 - accuracy(obj_logits[rel_idx], target_relo_classes_o)[0]
+            else:
+                losses['sub_error'] = torch.tensor(0, device=pred_logits.device)
+                losses['obj_error'] = torch.tensor(0, device=pred_logits.device)
+
         return losses
 
     @torch.no_grad()
@@ -367,6 +370,8 @@ class SetCriterion(nn.Module):
         src_logits = outputs['rel_logits']
         pred_classes = src_logits.argmax(-1)
 
+        running_on_real = False
+
         idx = self._get_src_permutation_idx(indices[1])
 
         # Gather target relation labels
@@ -389,12 +394,13 @@ class SetCriterion(nn.Module):
             for t in targets
         ):
           #print(f"placeholder found in relationships")
+            running_on_real = True
             target_classes = pred_classes
 
         # Check for invalid labels
         n_classes = src_logits.shape[-1]
         invalid = (target_classes_o < 0) | (target_classes_o >= n_classes)
-        if invalid.any():
+        if invalid.any() and not running_on_real:
             print("Found invalid targets:", target_classes_o[invalid])
 
         # Compute cross-entropy loss
@@ -539,8 +545,8 @@ class MLP(nn.Module):
 
 def build(args):
 
-    num_classes = 11 #11 #if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
-    num_rel_classes = 20 # 20 #if args.dataset != 'oi' else 31
+    num_classes = 11 #if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
+    num_rel_classes = 20 #if args.dataset != 'oi' else 31
 
     # num_classes = 151 if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
     # num_rel_classes = 51 if args.dataset != 'oi' else 31

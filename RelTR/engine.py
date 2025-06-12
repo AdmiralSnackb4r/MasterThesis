@@ -52,7 +52,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0):
     model.train()
-    model = model_to_freeze(model_to_freeze, 6)
+    #model = model_to_freeze(model, 6)
     criterion.train()
 
     stats = {
@@ -63,15 +63,21 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         'obj_error': [],
         'rel_error': []
     }
+    counter = 0
 
     for samples, targets in data_loader:
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
+        #print(f"Model doing output")
         outputs = model(samples)
+        #print(f"Model done ouput")
+        #print(f"output done")
+        #print(f"Critetion calculates loss")
         loss_dict = criterion(outputs, targets)
+        #print(f"Loss calculated")
         weight_dict = criterion.weight_dict
-
+        #print(f"loss calculated")
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict if k in weight_dict)
 
         # Logging-safe loss
@@ -85,18 +91,24 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             sys.exit(1)
 
         optimizer.zero_grad(set_to_none=True)
+        #print(f"losses going backward")
         losses.backward()
 
         if max_norm > 0:
             trainable_params = [p for p in model.parameters() if p.requires_grad and p.grad is not None]
             torch.nn.utils.clip_grad_norm_(trainable_params, max_norm)
 
+        #print(f"optimizer go")
         optimizer.step()
-
+        
         # Collect stats
         stats['loss'].append(loss_value)
         for key in ['class_error', 'sub_error', 'loss_bbox', 'obj_error', 'rel_error']:
             stats[key].append(loss_dict_reduced.get(key))
+
+        if counter % 1000 == 0:
+            print(f"Step {counter} done")
+        counter += 1
 
     return stats
 
@@ -151,8 +163,8 @@ def evaluate_rel_batch(outputs, targets, evaluator, evaluator_list):
         sub_bboxes_scaled = rescale_bboxes(outputs['sub_boxes'][batch].cpu(), torch.flip(target['orig_size'],dims=[0]).cpu()).clone().numpy()
         obj_bboxes_scaled = rescale_bboxes(outputs['obj_boxes'][batch].cpu(), torch.flip(target['orig_size'],dims=[0]).cpu()).clone().numpy()
 
-        pred_sub_scores, pred_sub_classes = torch.max(outputs['sub_logits'][batch].softmax(-1)[:, :-1], dim=2)
-        pred_obj_scores, pred_obj_classes = torch.max(outputs['obj_logits'][batch].softmax(-1)[:, :-1], dim=2)
+        pred_sub_scores, pred_sub_classes = torch.max(outputs['sub_logits'][batch].softmax(-1)[:, :-1], dim=1)
+        pred_obj_scores, pred_obj_classes = torch.max(outputs['obj_logits'][batch].softmax(-1)[:, :-1], dim=1)
         rel_scores = outputs['rel_logits'][batch][:,1:-1].softmax(-1)
 
         pred_entry = {'sub_boxes': sub_bboxes_scaled,

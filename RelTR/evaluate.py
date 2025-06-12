@@ -50,7 +50,7 @@ def get_args_parser():
     parser.add_argument('--batch_size', default=1, type=int)
     parser.add_argument('--num_workers', default=2, type=int)
     #parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
-    parser.add_argument('--datapath', default="F:\\scenario_runner-0.9.15\\Data", help='path to data')
+    parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/Carla/Data", help='path to data')
 
     # image path
     parser.add_argument('--img_path', type=str, default='demo/vg1.jpg',
@@ -541,7 +541,7 @@ def compute_ap(pred_boxes, pred_scores, gt_boxes, iou_threshold=0.5):
 def main(args):
     device = torch.device(args.device)
 
-    dataset_test = build_carla_dataset(args=args, anno_file='RelTR\\datasets\\annotations\\Carla\\test_dataset_pre.json', transform=make_transforms('val'))
+    dataset_test = build_carla_dataset(args=args, anno_file='RelTR/datasets/annotations/Carla/test_dataset_pre.json', transform=make_transforms('val'))
     sampler_test = RandomSampler(dataset_test)
 
     data_loader_val = DataLoader(dataset_test, args.batch_size, sampler=sampler_test,
@@ -550,7 +550,7 @@ def main(args):
     model, criterion, _ = build_model(args)
     model.to(device)
 
-    checkpoint = torch.load('RelTR\\ckpt\\run_11\\checkpoint0329.pth', map_location='cpu', weights_only=False)
+    checkpoint = torch.load('RelTR/ckpt/run_11/checkpoint0329.pth', map_location='cpu', weights_only=False)
     new_state_dict = OrderedDict()
     state_dict = checkpoint['model']
     for k, v in state_dict.items():
@@ -680,18 +680,18 @@ def main(args):
     with open('carla_set.json', 'w') as f:
         json.dump(save_json, f, indent=4)
 
-    avg_precs = [float('{:.4f}'.format(ap)) for ap in avg_precs]
-    iou_thrs = [float('{:.4f}'.format(thr)) for thr in iou_thrs]
-    print('map: {:.2f}'.format(100*np.mean(avg_precs)))
-    print('avg precs: ', avg_precs)
-    print('iou_thrs:  ', iou_thrs)
-    plt.legend(loc='upper right', title='IOU Thr', frameon=True)
-    for xval in np.linspace(0.0, 1.0, 11):
-        plt.vlines(xval, 0.0, 1.1, color='gray', alpha=0.3, linestyles='dashed')
-    end_time = time.time()
-    print('\nPlotting and calculating mAP takes {:.4f} secs'.format(end_time - start_time))
-    plt.savefig('carla_set.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    # avg_precs = [float('{:.4f}'.format(ap)) for ap in avg_precs]
+    # iou_thrs = [float('{:.4f}'.format(thr)) for thr in iou_thrs]
+    # print('map: {:.2f}'.format(100*np.mean(avg_precs)))
+    # print('avg precs: ', avg_precs)
+    # print('iou_thrs:  ', iou_thrs)
+    # plt.legend(loc='upper right', title='IOU Thr', frameon=True)
+    # for xval in np.linspace(0.0, 1.0, 11):
+    #     plt.vlines(xval, 0.0, 1.1, color='gray', alpha=0.3, linestyles='dashed')
+    # end_time = time.time()
+    # print('\nPlotting and calculating mAP takes {:.4f} secs'.format(end_time - start_time))
+    # plt.savefig('carla_set.png', dpi=300, bbox_inches='tight')
+    # plt.show()
     
 
 # Single IoU calculation took 791.2773 secs
