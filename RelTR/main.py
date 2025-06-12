@@ -27,7 +27,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
     parser.add_argument('--lr', default=1e-4, type=float)
     parser.add_argument('--lr_backbone', default=1e-5, type=float)
-    parser.add_argument('--batch_size', default=1, type=int)
+    parser.add_argument('--batch_size', default=8, type=int)
     parser.add_argument('--weight_decay', default=1e-4, type=float)
     parser.add_argument('--epochs', default=700, type=int)
     parser.add_argument('--lr_drop', default=600, type=int)
@@ -80,7 +80,7 @@ def get_args_parser():
     # * Loss coefficients
     parser.add_argument('--bbox_loss_coef', default=5, type=float)
     parser.add_argument('--giou_loss_coef', default=2, type=float)
-    parser.add_argument('--rel_loss_coef', default=1, type=float)
+    parser.add_argument('--rel_loss_coef', default=5, type=float)
     parser.add_argument('--eos_coef', default=0.1, type=float,
                         help="Relative classification weight of the no-object class")
 
@@ -97,7 +97,7 @@ def get_args_parser():
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--resume', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_full_sim_real_sgd/checkpoint0139.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='/p/scratch/hai_1008/kromm3/RelTR/ckpt/run_full_tandem/checkpoint0199.pth', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true')
@@ -264,10 +264,9 @@ def main(args):
             "lr": args.lr_backbone,
         },
     ]
-    # TODO optimizer wechseln
-    # SGD with nesterov momentum <= 0.9
     optimizer = torch.optim.AdamW(param_dicts, lr=args.lr,
-                                  weight_decay=args.weight_decay)
+                                   weight_decay=args.weight_decay)
+    #optimizer = torch.optim.SGD(param_dicts, lr=args.lr, momentum=0.7, nesterov=True)
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
 
     #dataset_train = build_dataset(image_set='train', args=args)

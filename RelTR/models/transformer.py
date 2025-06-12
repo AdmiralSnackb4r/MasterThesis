@@ -66,26 +66,6 @@ class Transformer(nn.Module):
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         ### --------------------------- ###
 
-        sample = 0
-        channel = 5
-
-        # Reshape memory:
-        memory_reshaped = memory.permute(1, 2, 0).contiguous()  # (batch_size, hidden_dim, H*W)
-        memory_reshaped = memory_reshaped.view(bs, c, h, w)     # (batch_size, hidden_dim, H, W)
-
-        #print(memory_reshaped.shape)
-
-        # Aggregate across all channels (choose mean or max):
-        aggregated_map = memory_reshaped[sample].mean(dim=0)  # Shape: (H, W)
-        # alternatively: aggregated_map = memory_reshaped[sample].max(dim=0).values
-
-        # Visualize:
-        # plt.imshow(aggregated_map.detach().cpu().numpy(), cmap='viridis')
-        # plt.colorbar()
-        # plt.savefig('encoder_heatmap.png', dpi=600, bbox_inches='tight')
-        # plt.title(f"Encoder output: Batch {sample}, All channels (mean)")
-        # plt.show()
-
 
         # print("Shape:", memory.shape)  # or tensor.size()
         # print("Data type:", memory.dtype)
