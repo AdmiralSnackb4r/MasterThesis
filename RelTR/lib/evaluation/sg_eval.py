@@ -28,17 +28,17 @@ class BasicSceneGraphEvaluator:
     def evaluate_scene_graph_entry(self, gt_entry, pred_scores, viz_dict=None, iou_thresh=0.5):
         res = evaluate_from_dict(gt_entry, pred_scores, self.mode, self.result_dict,
                                   viz_dict=viz_dict, iou_thresh=iou_thresh, multiple_preds=self.multiple_preds)
-        # self.print_stats()
-        return res
+        output = self.print_stats()
+        return res, output
 
     def save(self, fn):
         np.save(fn, self.result_dict)
 
     def print_stats(self):
         output = {}
-        print('======================' + self.mode + '============================')
+        #print('======================' + self.mode + '============================')
         for k, v in self.result_dict[self.mode + '_recall'].items():
-            print('R@%i: %f' % (k, np.mean(v)))
+            #print('R@%i: %f' % (k, np.mean(v)))
             output['R@%i' % k] = np.mean(v)
         return output
 
@@ -74,7 +74,7 @@ def evaluate_from_dict(gt_entry, pred_entry, mode, result_dict, multiple_preds=F
 
     pred_to_gt, _, rel_scores = evaluate_recall(
                 gt_rels, gt_boxes, gt_classes,
-                pred_rels, sub_boxes, obj_boxes, sub_score, obj_score, predicate_scores, sub_class, obj_class, phrdet= mode=='phrdet',
+                pred_rels, sub_boxes, obj_boxes, sub_score, obj_score, predicate_scores, sub_class, obj_class, phrdet=True,# mode=='phrdet',
                 **kwargs)
 
     for k in result_dict[mode + '_recall']:
@@ -119,8 +119,22 @@ def evaluate_recall(gt_rels, gt_boxes, gt_classes,
     # Exclude self rels
     # assert np.all(pred_rels[:,0] != pred_rels[:,ĺeftright])
 
+    # print("gt triplet: ", gt_triplets.shape)
+
+    # print("sub class: ", sub_class.shape)
+    # print("pred rels: ", pred_rels.shape)
+    # print("obj_class: ", obj_class.shape)
+
     pred_triplets = np.column_stack((sub_class, pred_rels, obj_class))
+
+    #print("pred_triplets: ", pred_triplets.shape)
+
     pred_triplet_boxes =  np.column_stack((sub_boxes, obj_boxes))
+    # print("sub_boxes: ", sub_boxes.shape)
+    # print("obj_boxes: ", obj_boxes.shape)
+
+    # print("pred_triplet_boxes: ", pred_triplet_boxes.shape)
+
     relation_scores = np.column_stack((sub_score, obj_score, predicate_scores))  #TODO!!!! do not * 0.1 finally
 
 
@@ -196,8 +210,14 @@ def _compute_pred_matches(gt_triplets, pred_triplets,
     # This performs a matrix multiplication-esque thing between the two arrays
     # Instead of summing, we want the equality, so we reduce in that way
     # The rows correspond to GT triplets, columns to pred triplets
+
+
+    #print(gt_triplets, pred_triplets)
+
     keeps = intersect_2d(gt_triplets, pred_triplets)
+    #print(keeps)
     gt_has_match = keeps.any(1)
+    #print(gt_has_match)
     pred_to_gt = [[] for x in range(pred_boxes.shape[0])]
     for gt_ind, gt_box, keep_inds in zip(np.where(gt_has_match)[0],
                                          gt_boxes[gt_has_match],
@@ -218,10 +238,20 @@ def _compute_pred_matches(gt_triplets, pred_triplets,
             sub_iou = bbox_overlaps(gt_box[None,:4], boxes[:, :4])[0]
             obj_iou = bbox_overlaps(gt_box[None,4:], boxes[:, 4:])[0]
 
-            inds = (sub_iou >= iou_thresh) & (obj_iou >= iou_thresh)
+            inds = (sub_iou >= iou_thresh) | (obj_iou >= iou_thresh)
 
-        for i in np.where(keep_inds)[0][inds]:
+        # try:
+        #     result = np.where(keep_inds)[0][inds.numpy()]
+        # except IndexError as e:
+        #     print("keep_inds:", keep_inds )
+        #     print("IndexError:", e)
+        #     print("np.where(keep_inds)[0]:", np.where(keep_inds)[0])
+        #     print("inds:", inds)
+
+        for i in np.where(keep_inds)[0][inds.numpy()]:
             pred_to_gt[i].append(int(gt_ind))
+
+
     return pred_to_gt
 
 

@@ -14,6 +14,9 @@ def bbox_overlaps(boxes: torch.Tensor, query_boxes: torch.Tensor) -> torch.Tenso
     N = boxes.shape[0]
     K = query_boxes.shape[0]
 
+    boxes = torch.Tensor(boxes)
+    query_boxes = torch.Tensor(query_boxes)
+
     # Compute intersection
     max_xy = torch.min(boxes[:, None, 2:], query_boxes[:, 2:])  # (N, K, 2)
     min_xy = torch.max(boxes[:, None, :2], query_boxes[:, :2])  # (N, K, 2)

@@ -21,10 +21,10 @@ def get_args_parser():
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
     #                    help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\DynamicObjectCrossing_1_3\\semantic\\filtered\\00048826.png',
-                        help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\val\\ab309345-00000000.jpg',
-    #                     help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\DynamicObjectCrossing_1_4\\rgb\\filtered\\00002962.png',
+    #                    help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\val\\ab309345-00000000.jpg',
+                         help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\Mappillary\\training\\images\\_3wOt13eozLKpGw0yOBBrg.jpg',
     #                     help="Path of the test image")
 
@@ -37,9 +37,9 @@ def get_args_parser():
                         help="Type of positional embedding to use on top of the image features")
 
     # * Transformer
-    parser.add_argument('--enc_layers', default=4, type=int,
+    parser.add_argument('--enc_layers', default=6, type=int,
                         help="Number of encoding layers in the transformer")
-    parser.add_argument('--dec_layers', default=4, type=int,
+    parser.add_argument('--dec_layers', default=6, type=int,
                         help="Number of decoding layers in the transformer")
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
@@ -47,9 +47,9 @@ def get_args_parser():
                         help="Size of the embeddings (dimension of the transformer)")
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
-    parser.add_argument('--nheads', default=4, type=int,
+    parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_entities', default=100, type=int,
+    parser.add_argument('--num_entities', default=300, type=int,
                         help="Number of query slots")
     parser.add_argument('--num_triplets', default=200, type=int,
                         help="Number of query slots")
@@ -61,7 +61,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_freezed\\checkpoint0199.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_tandem\\checkpoint0099.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -177,7 +177,7 @@ def main(args):
     img = transform(im).unsqueeze(0)
 
     # propagate through the model
-    outputs = model(img)
+    outputs, _, _ = model(img)
     print(f"Inference done successfully")
 
     # keep only predictions with 0.+ confidence
@@ -186,7 +186,7 @@ def main(args):
     # convert boxes from [0; 1] to image scales
     bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], im.size)
     #print(bboxes_scaled)
-    topk = 20
+    topk = 10
     keep_queries = torch.nonzero(keep, as_tuple=True)[0]
     indices = torch.argsort(-probas[keep_queries].max(-1)[0])[:topk]
     keep_queries = keep_queries[indices]
@@ -243,53 +243,53 @@ def main(args):
 
         #visualize_multiple_attention_maps(im, dec_attn_weights_entity, title_prefix="Entity ", image_size=im.size)
 
-        # fig, axs = plt.subplots(ncols=len(indices), nrows=2, figsize=(22, 7))
-        # for idx, ax_i, (oxmin, oymin, oxmax, oymax) in \
-        #         zip(keep_queries, axs.T, bboxes_scaled[indices]):
-        #     #class_index = probas[keep][idx].argmax()
-        #     ax = ax_i[0]
-        #     ax.imshow(dec_attn_weights_entity[0, idx].view(h, w))
-        #     ax.axis('off')
-        #     ax.set_title(f'query id: {idx.item()}')
-        #     # ax = ax_i[1]
-        #     # ax.imshow(dec_attn_weights_obj[0, idx].view(h, w))
-        #     # ax.axis('off')
-        #     ax = ax_i[1]
-        #     ax.imshow(im)
-        #     ax.add_patch(plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
-        #                                fill=False, color='orange', linewidth=2.5))
-        #     class_name = 'nooo'
-        #     for key, value in label_id.items(): # get the class name from the class index
-        #         if value == probas[idx].argmax():
-        #             class_name = key
+        fig, axs = plt.subplots(ncols=len(indices), nrows=2, figsize=(22, 7))
+        for idx, ax_i, (oxmin, oymin, oxmax, oymax) in \
+                zip(keep_queries, axs.T, bboxes_scaled[indices]):
+            #class_index = probas[keep][idx].argmax()
+            ax = ax_i[0]
+            ax.imshow(dec_attn_weights_entity[0, idx].view(h, w))
+            ax.axis('off')
+            ax.set_title(f'query id: {idx.item()}')
+            # ax = ax_i[1]
+            # ax.imshow(dec_attn_weights_obj[0, idx].view(h, w))
+            # ax.axis('off')
+            ax = ax_i[1]
+            ax.imshow(im)
+            ax.add_patch(plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
+                                       fill=False, color='orange', linewidth=2.5))
+            class_name = 'nooo'
+            for key, value in label_id.items(): # get the class name from the class index
+                if value == probas[idx].argmax():
+                    class_name = key
 
-        #     ax.axis('off')
-        #     ax.set_title(class_name, fontsize=10)
+            ax.axis('off')
+            ax.set_title(class_name, fontsize=10)
 
-        # fig.tight_layout()
-        # plt.savefig('att_maps_zurich.png', dpi=300, bbox_inches='tight')
-        # plt.show()
+        fig.tight_layout()
+        plt.savefig('att_maps_zurich.png', dpi=300, bbox_inches='tight')
+        plt.show()
 
-        # Prepare bounding boxes and class labels for drawing
-        boxes_to_draw = []
-        for i, box in zip(keep_queries, bboxes_scaled[indices]):
-           # box = bboxes_scaled[i].tolist()
-            x_min, y_min, x_max, y_max = box
-            width = x_max - x_min
-            height = y_max - y_min
-            class_id = "unknown"
-            pred_class_idx = probas[i].argmax().item()
-            for label_name, label_idx in label_id.items():
-                if label_idx == pred_class_idx:
-                    class_id = label_name
-                    break
-            boxes_to_draw.append({
-                "bbox": [x_min, y_min, width, height],
-                "class_id": class_id
-            })
+        # # Prepare bounding boxes and class labels for drawing
+        # boxes_to_draw = []
+        # for i, box in zip(keep_queries, bboxes_scaled[indices]):
+        #    # box = bboxes_scaled[i].tolist()
+        #     x_min, y_min, x_max, y_max = box
+        #     width = x_max - x_min
+        #     height = y_max - y_min
+        #     class_id = "unknown"
+        #     pred_class_idx = probas[i].argmax().item()
+        #     for label_name, label_idx in label_id.items():
+        #         if label_idx == pred_class_idx:
+        #             class_id = label_name
+        #             break
+        #     boxes_to_draw.append({
+        #         "bbox": [x_min, y_min, width, height],
+        #         "class_id": class_id
+        #     })
 
-        # Draw all bounding boxes and labels on the original image
-        draw_bounding_boxes(img_path, boxes_to_draw, output_path="bounding_boxes_colored.png")
+        # # Draw all bounding boxes and labels on the original image
+        # draw_bounding_boxes(img_path, boxes_to_draw, output_path="bounding_boxes_colored.png")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('RelTR inference', parents=[get_args_parser()])

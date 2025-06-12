@@ -33,6 +33,7 @@ class RelTR(nn.Module):
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
+        print("aux loss", aux_loss)
 
         self.entity_embed = nn.Embedding(num_entities, hidden_dim*2)
         self.triplet_embed = nn.Embedding(num_triplets, hidden_dim*3)
@@ -164,7 +165,7 @@ class RelTR(nn.Module):
         if self.aux_loss:
             out['aux_outputs'] = self._set_aux_loss(outputs_class, outputs_coord, outputs_class_sub, outputs_coord_sub,
                                                     outputs_class_obj, outputs_coord_obj, outputs_class_rel)
-        return out
+        return out, hs_sub, hs_obj
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord, outputs_class_sub, outputs_coord_sub,
@@ -240,6 +241,7 @@ class SetCriterion(nn.Module):
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, reduction='none')
 
         loss_weight = torch.cat((torch.ones(pred_logits.shape[:2]).to(pred_logits.device), indices[2]*0.5, indices[3]*0.5), dim=-1)
+        # TODO anders bestrafen?
         losses = {'loss_ce': (loss_ce * loss_weight).sum()/self.empty_weight[target_classes].sum()}
 
         if log:
@@ -479,8 +481,8 @@ class MLP(nn.Module):
 
 def build(args):
 
-    num_classes = 11 #if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
-    num_rel_classes = 20 #if args.dataset != 'oi' else 31
+    num_classes = 11 #11 #if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
+    num_rel_classes = 20 # 20 #if args.dataset != 'oi' else 31
 
     # num_classes = 151 if args.dataset != 'oi' else 289 # some entity categories in OIV6 are deactivated.
     # num_rel_classes = 51 if args.dataset != 'oi' else 31

@@ -14,6 +14,7 @@ import networkx as nx
 import torch.nn as nn
 import torch.nn.init as init
 import math
+from collections import defaultdict
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -21,17 +22,19 @@ def get_args_parser():
     parser.add_argument('--dataset', default='vg')
 
     # image path
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000103_leftImg8bit.png',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
     #                      help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\DynamicObjectCrossing_1_3\\rgb\\filtered\\00048826.png',
-    #                     help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\FollowLeadingVehicle_1\\rgb\\filtered\\00007779.png',
+                         help="Path of the test image")
     # parser.add_argument('--img_path', type=str, default='demo/cat.jpg',
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\test\\d1b624d3-00000000.jpg',
     #                     help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
-                          help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\Mappillary\\testing\\images\\2Q26fiACxC52F2K9jRUrMg.jpg',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\Mappillary\\training\\images\\0gFsMvCekBJRwPYYl_k12Q.jpg',
+    #                     help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000834_leftImg8bit.png',
     #                      help="Path of the test image")
 
     # * Backbone
@@ -67,7 +70,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint0299.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint0309.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -325,7 +328,7 @@ def main(args):
     model, _, _ = build_model(args)
     ckpt = torch.load(args.resume, weights_only=False)
     #result = check_frozen_weights_integrity(model, 'ckpt\\run_first_part\\checkpoint0248_.pth')
-    #ckpt = merge_model(full_model='ckpt\\run_full_freezed\\checkpoint0089.pth', first_part='ckpt\\run_first_part\\checkpoint0248_.pth')
+    #ckpt = merge_model(full_model='ckpt\\run_full_sim\\checkpoint0199.pth', first_part='ckpt\\run_first_part\\checkpoint0248_.pth')
     state_dict = ckpt['model'] if 'model' in ckpt else ckpt
 
     #print(result)
@@ -363,14 +366,14 @@ def main(args):
     labels_entity = probas_entity_kept.argmax(dim=1)
 
     # Select top-k confident entities
-    topk = 25
+    topk = 300
     keep_queries_entity = torch.nonzero(keep_entity, as_tuple=True)[0]
     indices_entity = torch.argsort(-probas_entity_kept.max(-1)[0])[:topk]
     keep_queries_entity = keep_queries_entity[indices_entity]
 
     # Keep relation queries with confidence > 0.5 in all three logits
-    keep = torch.logical_or(probas.max(-1).values > 0.5,
-            torch.logical_or(probas_sub.max(-1).values > 0.5, probas_obj.max(-1).values > 0.5))
+    keep = torch.logical_and(probas.max(-1).values > 0.,
+            torch.logical_and(probas_sub.max(-1).values > 0., probas_obj.max(-1).values > 0.))
 
     # Filter labels and boxes for subjects and objects accordingly
     labels_sub = probas_sub[keep].argmax(dim=1)
@@ -486,84 +489,111 @@ def main(args):
         #     )
 
 
-        for idx, (sxmin, symin, sxmax, symax), (oxmin, oymin, oxmax, oymax) in zip(keep_queries, sub_bboxes_scaled[indices], obj_bboxes_scaled[indices]):
-            subj_name = CLASSES[probas_sub[idx].argmax()]
-            obj_name = CLASSES[probas_obj[idx].argmax()]
+        def round_box(box, precision=2):
+            return tuple(round(float(v), precision) for v in box)
 
-            subj_node = f'Subj-{idx}: {subj_name}'
-            obj_node = f'Obj-{idx}: {obj_name}'
+        # Step 1: Create unique subject and object box maps
+        unique_subj_boxes = {}
+        unique_obj_boxes = {}
 
-            # Assign colors if not yet assigned
-            if subj_node not in entity_color_map:
-                entity_color_map[subj_node] = cmap(color_idx)
-                color_idx += 1
-            if obj_node not in entity_color_map:
-                entity_color_map[obj_node] = cmap(color_idx)
-                color_idx += 1
+        subj_box_to_node = {}
+        obj_box_to_node = {}
 
-            subj_color = entity_color_map[subj_node]
-            obj_color = entity_color_map[obj_node]
+        duplicate_subj_indices = defaultdict(list)
+        duplicate_obj_indices = defaultdict(list)
 
-            #Subject box
-            rect_s = plt.Rectangle(
-               (sxmin, symin), width=sxmax - sxmin, height=symax - symin,
-               fill=False, edgecolor=subj_color, linewidth=3
-            )
-            ax_left.add_patch(rect_s)
-            ax_left.text(
-               sxmin, symin - 5, subj_name,
-               fontsize=10, color=subj_color,
-               verticalalignment='bottom', weight='bold',
-               bbox=dict(facecolor='white', edgecolor=subj_color, boxstyle='round,pad=0.3', alpha=0.7)
-            )
+        for idx, sub_box in zip(keep_queries, sub_bboxes_scaled[indices]):
+            idx = int(idx)
+            box_key = round_box(sub_box)
+            if box_key not in unique_subj_boxes:
+                subj_cls = CLASSES[probas_sub[idx].argmax()]
+                node_name = f"Subj-{subj_cls}-{len(unique_subj_boxes)}"
+                unique_subj_boxes[box_key] = node_name
+            subj_box_to_node[idx] = unique_subj_boxes[box_key]
+            duplicate_subj_indices[unique_subj_boxes[box_key]].append(idx)
 
-            #Object box
-            rect_o = plt.Rectangle(
-               (oxmin, oymin), width=oxmax - oxmin, height=oymax - oymin,
-               fill=False, edgecolor=obj_color, linewidth=3
-            )
-            ax_left.add_patch(rect_o)
-            ax_left.text(
-               oxmin, oymin - 5, obj_name,
-               fontsize=10, color=obj_color,
-               verticalalignment='bottom', weight='bold',
-               bbox=dict(facecolor='white', edgecolor=obj_color, boxstyle='round,pad=0.3', alpha=0.7)
-            )
+        for idx, obj_box in zip(keep_queries, obj_bboxes_scaled[indices]):
+            idx = int(idx)
+            box_key = round_box(obj_box)
+            if box_key not in unique_obj_boxes:
+                obj_cls = CLASSES[probas_obj[idx].argmax()]
+                node_name = f"Obj-{obj_cls}-{len(unique_obj_boxes)}"
+                unique_obj_boxes[box_key] = node_name
+            obj_box_to_node[idx] = unique_obj_boxes[box_key]
+            duplicate_obj_indices[unique_obj_boxes[box_key]].append(idx)
 
-        # --------------------------------------
-        # Step 3: Plot right clean relationship graph
-        # --------------------------------------
-        G = nx.DiGraph()
+        # Step 2: Draw subject and object bounding boxes (only first per group)
+        for idx in keep_queries:
+            idx = int(idx)  # 🔥 Fix tensor key issue
+            subj_node = subj_box_to_node[idx]
+            obj_node = obj_box_to_node[idx]
+
+            subj_color = entity_color_map.setdefault(subj_node, cmap(color_idx)); color_idx += 1
+            obj_color = entity_color_map.setdefault(obj_node, cmap(color_idx)); color_idx += 1
+
+            subj_box_key = [k for k, v in unique_subj_boxes.items() if v == subj_node][0]
+            obj_box_key = [k for k, v in unique_obj_boxes.items() if v == obj_node][0]
+
+            if idx == duplicate_subj_indices[subj_node][0]:
+                sxmin, symin, sxmax, symax = subj_box_key
+                subj_cls = subj_node.split('-')[1]
+                rect_s = plt.Rectangle((sxmin, symin), sxmax - sxmin, symax - symin,
+                                    fill=False, edgecolor=subj_color, linewidth=3)
+                ax_left.add_patch(rect_s)
+                ax_left.text(sxmin, symin - 5, subj_cls, fontsize=10, color=subj_color,
+                            verticalalignment='bottom', weight='bold',
+                            bbox=dict(facecolor='white', edgecolor=subj_color, boxstyle='round,pad=0.3', alpha=0.7))
+
+            if idx == duplicate_obj_indices[obj_node][0]:
+                oxmin, oymin, oxmax, oymax = obj_box_key
+                obj_cls = obj_node.split('-')[1]
+                rect_o = plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
+                                    fill=False, edgecolor=obj_color, linewidth=3)
+                ax_left.add_patch(rect_o)
+                ax_left.text(oxmin, oymin - 5, obj_cls, fontsize=10, color=obj_color,
+                            verticalalignment='bottom', weight='bold',
+                            bbox=dict(facecolor='white', edgecolor=obj_color, boxstyle='round,pad=0.3', alpha=0.7))
+
+        # Group relationships between same subj→obj pairs
+        edge_relation_map = defaultdict(list)
 
         for idx in keep_queries:
-            subj_cls = CLASSES[probas_sub[idx].argmax()]
-            obj_cls = CLASSES[probas_obj[idx].argmax()]
+            idx = int(idx)
+            subj_node = subj_box_to_node[idx]
+            obj_node = obj_box_to_node[idx]
             rel_cls = REL_CLASSES[probas[idx].argmax()]
 
-            subj_node = f'Subj-{idx}: {subj_cls}'
-            obj_node = f'Obj-{idx}: {obj_cls}'
+            edge_relation_map[(subj_node, obj_node)].append(rel_cls)
 
+        # Step 4: Draw graph with aggregated relationship labels
+        G = nx.DiGraph()
+
+        for (subj_node, obj_node), rels in edge_relation_map.items():
             G.add_node(subj_node)
             G.add_node(obj_node)
-            G.add_edge(subj_node, obj_node, label=rel_cls)
 
-        # Get node colors based on entity_color_map
+            # Combine unique relationships into a single label string
+            combined_rel = " / ".join(sorted(set(rels)))
+            G.add_edge(subj_node, obj_node, label=combined_rel)
+
+        # Get node colors
         node_colors = [entity_color_map[node] for node in G.nodes()]
-
-        # Layout
         pos = nx.spring_layout(G, k=1.2, iterations=50)
-        #pos = nx.arf_layout(G)
 
         # Draw nodes and edges
         nx.draw(
             G, pos, ax=ax_right, with_labels=True,
-            node_color=node_colors,
-            node_size=2000, font_size=10,
-            font_weight='bold', arrowsize=20,
+            node_color=node_colors, node_size=2000,
+            font_size=10, font_weight='bold', arrowsize=20,
             edgecolors='black'
         )
+
+        # Draw edge labels (multiple relationships per edge)
         edge_labels = nx.get_edge_attributes(G, 'label')
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='blue', font_size=10)
+        nx.draw_networkx_edge_labels(
+            G, pos, edge_labels=edge_labels,
+            font_color='blue', font_size=10
+        )
 
         ax_right.set_title('Relationships Graph', fontsize=16)
         ax_right.axis('off')

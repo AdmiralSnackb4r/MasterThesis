@@ -119,6 +119,10 @@ class CarlaDataset(Dataset):
         self.load_annotation()
         self.transforms = transforms
 
+        self.rel_categories = ['on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of',
+                            'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
+                            'infront of', 'behind', 'riding', 'next to', 'turning right on', 'driving on', 'turning left on', 'is hitting']
+
 
     
     def load_annotation(self):

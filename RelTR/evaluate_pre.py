@@ -7,8 +7,8 @@ import time
 from pathlib import Path
 import torchvision.transforms as T
 import argparse
-from models import custom_build_model
-from datasets import build_custom_dataset, build_merged_dataset
+from models import custom_build_model, build_model
+from datasets import build_custom_dataset, build_merged_dataset, build_carla_dataset
 import util.misc as utils
 import numpy as np
 from collections import defaultdict
@@ -18,6 +18,7 @@ import datasets.transforms as T
 from collections import OrderedDict
 from copy import deepcopy
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 def plot_pr_curve(
     precisions, recalls, category='Person', label=None, color=None, ax=None):
@@ -51,6 +52,8 @@ def get_args_parser():
     parser.add_argument('--num_workers', default=2, type=int)
     #parser.add_argument('--datapath', default="/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit", help='path to data')
     parser.add_argument('--datapath', default="S:\\Datasets", help='path to data')
+    parser.add_argument('--datapath_carla', default='F:\\scenario_runner-0.9.15\\Data', type=str)
+    parser.add_argument('--datapath_real', default='S:\\Datasets', type=str)
 
     # image path
     parser.add_argument('--img_path', type=str, default='demo/vg1.jpg',
@@ -65,9 +68,9 @@ def get_args_parser():
                         help="Type of positional embedding to use on top of the image features")
 
     # * Transformer
-    parser.add_argument('--enc_layers', default=6, type=int,
+    parser.add_argument('--enc_layers', default=4, type=int,
                         help="Number of encoding layers in the transformer")
-    parser.add_argument('--dec_layers', default=6, type=int,
+    parser.add_argument('--dec_layers', default=4, type=int,
                         help="Number of decoding layers in the transformer")
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
@@ -75,7 +78,7 @@ def get_args_parser():
                         help="Size of the embeddings (dimension of the transformer)")
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
-    parser.add_argument('--nheads', default=8, type=int,
+    parser.add_argument('--nheads', default=4, type=int,
                         help="Number of attention heads inside the transformer's attentions")
     parser.add_argument('--num_entities', default=100, type=int,
                         help="Number of query slots")
@@ -89,7 +92,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt/', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_first_part\\checkpoint0248_.pth', help='resume from checkpoint')
     #parser.add_argument('--eval', default='/p/scratch/hai_1008/kromm3/RelTR/eval/run_4/eval.json', help='place to store evaluation')
     parser.add_argument('--eval', default='RelTR\\eval\\run_12\\eval.json', help='place to store evaluation')
     parser.add_argument('--set_cost_class', default=1, type=float,
@@ -449,18 +452,21 @@ def compute_ap(pred_boxes, pred_scores, gt_boxes, iou_threshold=0.5):
 def main(args):
     device = torch.device(args.device)
 
-    dataset_test = build_merged_dataset(args=args, anno_file='RelTR\\datasets\\annotations\\Merged\\merged_test.json', transform=make_transforms('val'))
+    dataset_test = build_carla_dataset(args=args, anno_carla='datasets\\annotations\\Carla\\test_dataset_pre.json', transform=make_transforms('val'))
+
+    ckpt = torch.load(args.resume, weights_only=False)
+    #print(ckpt['model'].keys())
     sampler_test = RandomSampler(dataset_test)
 
     data_loader_val = DataLoader(dataset_test, args.batch_size, sampler=sampler_test,
                                   drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
 
-    model, criterion, _ = custom_build_model(args)
+    model, _, _ = custom_build_model(args)
     model.to(device)
 
-    checkpoint = torch.load('RelTR\\ckpt\\run_12\\checkpoint0394_.pth', map_location='cpu', weights_only=False)
+   # checkpoint = torch.load('RelTR\\ckpt\\run_12\\checkpoint0394_.pth', map_location='cpu', weights_only=False)
     new_state_dict = OrderedDict()
-    state_dict = checkpoint['model']
+    state_dict = ckpt['model']
     for k, v in state_dict.items():
         name = k[7:] if k.startswith("module.") else k
         new_state_dict[name] = v
@@ -471,7 +477,7 @@ def main(args):
     targets_arr = []
 
     with torch.no_grad():
-        for samples, targets in data_loader_val:
+        for samples, targets in tqdm(data_loader_val, desc="Collecting Outputs", unit="batch"):
             #print(targets)
             samples = samples.to(device)
             targets_arr.extend(targets)  # store ground-truth
@@ -495,7 +501,7 @@ def main(args):
     gt_boxes_all = {}
     pred_boxes_dict = {}
 
-    for output, targets in zip(outputs_arr, targets_arr):
+    for output, targets in tqdm(zip(outputs_arr, targets_arr), desc="Postprocessing", unit="img", total=len(outputs_arr)):
         img_id = targets['image_id'].item()  # Or however you store image IDs
         pred_logits = output['pred_logits'].squeeze(0)
         pred_boxes = output['pred_boxes'].squeeze(0)
@@ -546,6 +552,7 @@ def main(args):
     avg_precs = []
     iou_thrs = []
     for idx, iou_thr in enumerate(np.linspace(0.5, 0.95, 10)):
+        print(f"Doing evaluation for threshold: {iou_thr}")
         data = get_avg_precision_at_iou(gt_boxes_all, pred_boxes_dict, iou_thr=iou_thr)
         save_data = deepcopy(data)
 
@@ -564,7 +571,7 @@ def main(args):
         print(f"Finisehd evaluation for threshold {iou_thr}")
 
     # prettify for printing:
-    with open('merged_set.json', 'w') as f:
+    with open('bbox_trained_real_infer_on_sim.json', 'w') as f:
         json.dump(save_json, f, indent=4)
 
     avg_precs = [float('{:.4f}'.format(ap)) for ap in avg_precs]
@@ -577,7 +584,7 @@ def main(args):
         plt.vlines(xval, 0.0, 1.1, color='gray', alpha=0.3, linestyles='dashed')
     end_time = time.time()
     print('\nPlotting and calculating mAP takes {:.4f} secs'.format(end_time - start_time))
-    plt.savefig('merged_set.png', dpi=300, bbox_inches='tight')
+    plt.savefig('bbox_trained_real_infer_on_sim.png', dpi=300, bbox_inches='tight')
     plt.show()
     
 
@@ -591,7 +598,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser('RelTR evaluation script', parents=[get_args_parser()])
+    parser = argparse.ArgumentParser('RelTR evaluation script for bounding boxes', parents=[get_args_parser()])
     args = parser.parse_args()
     # if args.output_dir:
     #     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
