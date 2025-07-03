@@ -7,6 +7,7 @@ import math
 from lib.pytorch_misc import intersect_2d, argsort_desc
 from lib.fpn.box_intersections_cpu.bbox import bbox_overlaps
 np.set_printoptions(precision=3)
+import torch
 
 class BasicSceneGraphEvaluator:
     def __init__(self, mode, multiple_preds=False):
@@ -28,17 +29,17 @@ class BasicSceneGraphEvaluator:
     def evaluate_scene_graph_entry(self, gt_entry, pred_scores, viz_dict=None, iou_thresh=0.5):
         res = evaluate_from_dict(gt_entry, pred_scores, self.mode, self.result_dict,
                                   viz_dict=viz_dict, iou_thresh=iou_thresh, multiple_preds=self.multiple_preds)
-        # self.print_stats()
-        return res
+        output = self.print_stats()
+        return res, output
 
     def save(self, fn):
         np.save(fn, self.result_dict)
 
     def print_stats(self):
         output = {}
-        print('======================' + self.mode + '============================')
+        #print('======================' + self.mode + '============================')
         for k, v in self.result_dict[self.mode + '_recall'].items():
-            print('R@%i: %f' % (k, np.mean(v)))
+            #print('R@%i: %f' % (k, np.mean(v)))
             output['R@%i' % k] = np.mean(v)
         return output
 
@@ -62,7 +63,10 @@ def evaluate_from_dict(gt_entry, pred_entry, mode, result_dict, multiple_preds=F
 
     rel_scores = pred_entry['rel_scores']
 
-    pred_rels = 1+rel_scores.argmax(1)
+    pred_rels =  1+rel_scores.argmax(1)
+    #pred_rels = np.where(pred_rels == 1, 0, pred_rels)
+    # pred_rels = np.where(pred_rels == 1, 0, pred_rels)
+    # pred_rels = np.where(pred_rels != 1 and pred_rels != 0, 1 + pred_rels, pred_rels)
     predicate_scores = rel_scores.max(1)
 
     sub_boxes = pred_entry['sub_boxes']
@@ -74,12 +78,14 @@ def evaluate_from_dict(gt_entry, pred_entry, mode, result_dict, multiple_preds=F
 
     pred_to_gt, _, rel_scores = evaluate_recall(
                 gt_rels, gt_boxes, gt_classes,
-                pred_rels, sub_boxes, obj_boxes, sub_score, obj_score, predicate_scores, sub_class, obj_class, phrdet= mode=='phrdet',
+                pred_rels, sub_boxes, obj_boxes, sub_score, obj_score, predicate_scores, sub_class, obj_class, phrdet=True,# mode=='phrdet',
                 **kwargs)
 
     for k in result_dict[mode + '_recall']:
 
+        #print(pred_to_gt[:k], k)
         match = reduce(np.union1d, pred_to_gt[:k])
+        #print(match)
 
         rec_i = float(len(match)) / float(gt_rels.shape[0])
         result_dict[mode + '_recall'][k].append(rec_i)
@@ -119,8 +125,22 @@ def evaluate_recall(gt_rels, gt_boxes, gt_classes,
     # Exclude self rels
     # assert np.all(pred_rels[:,0] != pred_rels[:,ĺeftright])
 
+    #print("gt triplet: ", gt_triplets.shape)
+
+    # print("sub class: ", sub_class.shape)
+    # print("pred rels: ", pred_rels.shape)
+    # print("obj_class: ", obj_class.shape)
+
     pred_triplets = np.column_stack((sub_class, pred_rels, obj_class))
+
+    #print("pred_triplets: ", pred_triplets.shape)
+
     pred_triplet_boxes =  np.column_stack((sub_boxes, obj_boxes))
+    # print("sub_boxes: ", sub_boxes.shape)
+    # print("obj_boxes: ", obj_boxes.shape)
+
+    # print("pred_triplet_boxes: ", pred_triplet_boxes.shape)
+
     relation_scores = np.column_stack((sub_score, obj_score, predicate_scores))  #TODO!!!! do not * 0.1 finally
 
 
@@ -196,32 +216,70 @@ def _compute_pred_matches(gt_triplets, pred_triplets,
     # This performs a matrix multiplication-esque thing between the two arrays
     # Instead of summing, we want the equality, so we reduce in that way
     # The rows correspond to GT triplets, columns to pred triplets
+
+
+    #print("GT-Triplets: ", gt_triplets)
+    #print("Pred-Triplets: ", pred_triplets)
     keeps = intersect_2d(gt_triplets, pred_triplets)
+    #print(f"Total GT triplets: {len(gt_triplets)}")
+    #print(f"Total predicted triplets: {len(pred_triplets)}")
+
     gt_has_match = keeps.any(1)
-    pred_to_gt = [[] for x in range(pred_boxes.shape[0])]
+    pred_to_gt = [[] for _ in range(pred_boxes.shape[0])]
+
+    # ✅ #print matched GT triplets and their matching predictions
     for gt_ind, gt_box, keep_inds in zip(np.where(gt_has_match)[0],
-                                         gt_boxes[gt_has_match],
-                                         keeps[gt_has_match],
-                                         ):
+                                        gt_boxes[gt_has_match],
+                                        keeps[gt_has_match]):
         boxes = pred_boxes[keep_inds]
+
+        #print(f"\n✅ Matched GT triplet #{gt_ind}: {gt_triplets[gt_ind].tolist()}")
+        #print(f"  Candidate pred indices: {np.where(keep_inds)[0].tolist()}")
+
         if phrdet:
-            # Evaluate where the union box > 0.5
             gt_box_union = gt_box.reshape((2, 4))
             gt_box_union = np.concatenate((gt_box_union.min(0)[:2], gt_box_union.max(0)[2:]), 0)
 
             box_union = boxes.reshape((-1, 2, 4))
-            box_union = np.concatenate((box_union.min(1)[:,:2], box_union.max(1)[:,2:]), 1)
+            box_union = np.concatenate((box_union.min(1)[:, :2], box_union.max(1)[:, 2:]), 1)
 
-            inds = bbox_overlaps(gt_box_union[None], box_union)[0] >= iou_thresh
+            ious = bbox_overlaps(gt_box_union[None], box_union)[0]
+            inds = ious >= iou_thresh
 
+            #print(f"  Phrase IOUs: {ious.tolist()}")
+            #print(f"  Kept (IOU >= {iou_thresh}): {np.where(inds)[0].tolist()}")
         else:
-            sub_iou = bbox_overlaps(gt_box[None,:4], boxes[:, :4])[0]
-            obj_iou = bbox_overlaps(gt_box[None,4:], boxes[:, 4:])[0]
+            sub_iou = bbox_overlaps(gt_box[None, :4], boxes[:, :4])[0]
+            obj_iou = bbox_overlaps(gt_box[None, 4:], boxes[:, 4:])[0]
+
+            #print(f"  Sub IOU: {sub_iou.tolist()}")
+            #print(f"  Obj IOU: {obj_iou.tolist()}")
 
             inds = (sub_iou >= iou_thresh) & (obj_iou >= iou_thresh)
+            #print(f"  Kept (IOU >= {iou_thresh}): {np.where(inds)[0].tolist()}")
 
-        for i in np.where(keep_inds)[0][inds]:
+        matched_preds = np.where(keep_inds)[0][inds.numpy()]
+        for i in matched_preds:
             pred_to_gt[i].append(int(gt_ind))
+            #print(f"    🎯 Matched Pred #{i}: {pred_triplets[i].tolist()}")
+
+
+    # ❌ #print unmatched predictions (false positives)
+    # all_matched_pred_ids = set(i for sublist in pred_to_gt for i in sublist)
+    # all_pred_ids = set(range(len(pred_triplets)))
+    # unmatched_pred_ids = all_pred_ids - all_matched_pred_ids
+
+    #print("\n❌ Unmatched predictions (false positives):")
+    # for i in sorted(unmatched_pred_ids):
+    #     #print(f"    Pred #{i}: {pred_triplets[i].tolist()}")
+
+    # # ❌ #print unmatched GT triplets (false negatives)
+    # unmatched_gt_ids = set(range(len(gt_triplets))) - set(np.where(gt_has_match)[0])
+
+    # #print("\n❌ Unmatched GT triplets (false negatives):")
+    # for i in sorted(unmatched_gt_ids):
+    #     #print(f"    GT #{i}: {gt_triplets[i].tolist()}")
+
     return pred_to_gt
 
 

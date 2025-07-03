@@ -6,9 +6,9 @@ import matplotlib.pyplot as plt
 
 import torch
 import torchvision.transforms as T
-from models import custom_build_model
+from models import custom_build_model, build_model
 from visualization_techniques import visualize_attention_map, visualize_multiple_attention_maps
-
+import matplotlib.patches as patches
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -18,10 +18,10 @@ def get_args_parser():
     # image path
     # parser.add_argument('--img_path', type=str, default='/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit/test/munich/munich_000195_000019_leftImg8bit.png',
     #                     help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\hamburg\\hamburg_000000_000629_leftImg8bit.png',
-                        help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\_out\\DynamicObjectCrossing_4\\rgb\\filtered\\00005255.png',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\hamburg\\hamburg_000000_000629_leftImg8bit.png',
     #                    help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_3_3\\rgb\\filtered\\00001758.png',
+                        help="Path of the test image")
 
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -44,7 +44,7 @@ def get_args_parser():
                         help="Dropout applied in the transformer")
     parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_entities', default=100, type=int,
+    parser.add_argument('--num_entities', default=300, type=int,
                         help="Number of query slots")
     parser.add_argument('--num_triplets', default=200, type=int,
                         help="Number of query slots")
@@ -56,7 +56,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='RelTR\\ckpt\\run_1\\checkpoint0414_.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint0309.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -100,37 +100,11 @@ def main(args):
 
 
     label_id = {
-    "road" : 0,
-    "side walk" : 1,
-    "parking" : 2,
-    "rail track" : 3,
-    "building" : 4,
-    "wall" : 5,
-    "fence" : 6,
-    "guard rail" : 7,
-    "bridge" : 8,
-    "tunnel" : 9,
-    "pole" : 10,
-    "traffic light" : 11,
-    "traffic sign" : 12,
-    "vegetation" : 13,
-    "terrain" : 14,
-    "sky" : 15,
-    "person" : 16,
-    "rider" : 17,
-    "car" : 18,
-    "truck" : 19,
-    "bus" : 20,
-    "caravan" : 21,
-    "trailer" : 22,
-    "train" : 23,
-    "motorcycle" : 24,
-    "bicycle" : 25,
-    "ground" : 26
+    'ground' : 0, 'road' : 1, 'side walk' : 2, 'bridge' : 3, 'pole' : 4, 'traffic light' : 5, 'traffic sign' : 6, 'person' : 7, 'car' : 8, 'truck' : 9, 'bicycle' : 10
     }
 
     
-    model, _, _ = custom_build_model(args)
+    model, _, _ = build_model(args)
     ckpt = torch.load(args.resume, weights_only=False, map_location='cpu')
     state_dict = ckpt['model']
 
@@ -143,104 +117,69 @@ def main(args):
     model.eval()
     print(f"Model loaded successfully from {args.resume}")
 
+    # Load image
     img_path = args.img_path
     im = Image.open(img_path).convert('RGB')
 
-    # mean-std normalize the input image (batch-size: 1)
+    # Transform
+    transform = T.Compose([
+        T.Resize(800),
+        T.ToTensor(),
+        T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
     img = transform(im).unsqueeze(0)
 
-    # propagate through the model
-    outputs = model(img)
-    print(f"Inference done successfully")
-
-    # keep only predictions with 0.+ confidence
-    probas = outputs['pred_logits'].softmax(-1)[0, :, :-1]
-    keep = torch.tensor(probas.max(-1).values > 0.98)
-    # convert boxes from [0; 1] to image scales
-    bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], im.size)
-    #print(bboxes_scaled)
-    topk = 10
-    keep_queries = torch.nonzero(keep, as_tuple=True)[0]
-    indices = torch.argsort(-probas[keep_queries].max(-1)[0])[:topk]
-    keep_queries = keep_queries[indices]
-
-    # use lists to store the outputs via up-values
-    conv_features, enc_attn_weights, dec_attn_weights_entity, dec_attn_weights_sub, dec_attn_weights_obj = [], [], [], [], []
-
-    hooks = [
-        model.backbone[-2].register_forward_hook(
-            lambda self, input, output: conv_features.append(output)
-        ),
-        model.transformer.encoder.layers[-1].self_attn.register_forward_hook(
-            lambda self, input, output: enc_attn_weights.append(output[1])
-        ),
-        model.transformer.decoder.layers[-1].cross_attn_entity.register_forward_hook(
-            lambda self, input, output: dec_attn_weights_entity.append(output[1])
-        ),
-        # model.transformer.decoder.layers[-1].cross_attn_sub.register_forward_hook(
-        #     lambda self, input, output: dec_attn_weights_sub.append(output[1])
-        # ),
-        # model.transformer.decoder.layers[-1].cross_attn_obj.register_forward_hook(
-        #     lambda self, input, output: dec_attn_weights_obj.append(output[1])
-        # )
-    ]
+    # Inference
     with torch.no_grad():
-        # propagate through the model
         outputs = model(img)
 
-        for hook in hooks:
-            hook.remove()
+    # Prediction probabilities
+    probas = outputs['pred_logits'].softmax(-1)[0, :, :-1]
+    scores = probas.max(-1).values
 
-        #print(conv_features)
+    # Confidence threshold
+    conf_thresh = 0.99
+    keep = scores > conf_thresh
 
-        #for i in conv_features:
-        #    print(i)
+    # Rescale boxes
+    bboxes_scaled = rescale_bboxes(outputs['pred_boxes'][0, keep], im.size)
+    classes = probas[keep].argmax(-1)
 
+    # Visualization
+    fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+    ax.imshow(im)
 
-        enc_attn_weights_list = enc_attn_weights
-        dec_attn_weights_entity_list = dec_attn_weights_entity
-        dec_attn_weights_sub_list = dec_attn_weights_sub
-        dec_attn_weights_obj_list = dec_attn_weights_obj
+    # Distinct colors
+    num_colors = len(classes)
+    color_map = plt.cm.get_cmap('hsv', num_colors + 1)
 
+    for i, (box, cls_idx) in enumerate(zip(bboxes_scaled, classes)):
+        xmin, ymin, xmax, ymax = box.tolist()
+        color = color_map(i)  # RGB tuple
 
-        # don't need the list anymore
-        conv_features = conv_features[0]
-        enc_attn_weights = enc_attn_weights[0]
-        dec_attn_weights_entity = dec_attn_weights_entity[0]
-        #dec_attn_weights_sub = dec_attn_weights_sub[0]
-        #dec_attn_weights_obj = dec_attn_weights_obj[0]
+        rect = patches.Rectangle(
+            (xmin, ymin), xmax - xmin, ymax - ymin,
+            linewidth=2, edgecolor=color, facecolor='none'
+        )
+        ax.add_patch(rect)
 
-        # get the feature map shape
-        h, w = conv_features['0'].tensors.shape[-2:]
-        im_w, im_h = im.size
+        # Lookup class name
+        class_name = "unknown"
+        for name, idx in label_id.items():
+            if idx == cls_idx.item():
+                class_name = name
+                break
 
-        #visualize_multiple_attention_maps(im, dec_attn_weights_entity, title_prefix="Entity ", image_size=im.size)
+        ax.text(
+            xmin, ymin - 5, f'{class_name} ({scores[keep][i]:.2f})',
+            fontsize=10, color=color, weight='bold',
+            bbox=dict(facecolor='black', alpha=0.5, pad=1)
+        )
 
-        fig, axs = plt.subplots(ncols=len(indices), nrows=2, figsize=(22, 7))
-        for idx, ax_i, (oxmin, oymin, oxmax, oymax) in \
-                zip(keep_queries, axs.T, bboxes_scaled[indices]):
-            #class_index = probas[keep][idx].argmax()
-            ax = ax_i[0]
-            ax.imshow(dec_attn_weights_entity[0, idx].view(h, w))
-            ax.axis('off')
-            ax.set_title(f'query id: {idx.item()}')
-            # ax = ax_i[1]
-            # ax.imshow(dec_attn_weights_obj[0, idx].view(h, w))
-            # ax.axis('off')
-            ax = ax_i[1]
-            ax.imshow(im)
-            ax.add_patch(plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
-                                       fill=False, color='orange', linewidth=2.5))
-            class_name = 'nooo'
-            for key, value in label_id.items(): # get the class name from the class index
-                if value == probas[idx].argmax():
-                    class_name = key
+    ax.axis('off')
+    plt.tight_layout()
+    plt.show()
 
-            ax.axis('off')
-            ax.set_title(class_name, fontsize=10)
-
-        fig.tight_layout()
-        plt.show()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('RelTR inference', parents=[get_args_parser()])

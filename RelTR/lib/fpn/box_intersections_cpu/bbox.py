@@ -11,6 +11,10 @@ def bbox_overlaps(boxes: torch.Tensor, query_boxes: torch.Tensor) -> torch.Tenso
     Returns:
         Tensor: Shape (N, K) containing IoU values.
     """
+
+    boxes = torch.Tensor(boxes)
+    query_boxes = torch.Tensor(query_boxes)
+
     N = boxes.shape[0]
     K = query_boxes.shape[0]
 

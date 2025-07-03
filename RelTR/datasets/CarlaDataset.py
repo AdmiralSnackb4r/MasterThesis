@@ -121,7 +121,7 @@ class CarlaDataset(Dataset):
         self.use_real_now = False
 
         # Categories for evaluation
-        self.rel_categories = ['on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of',
+        self.rel_categories = ['N/A', 'on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of',
                             'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
                             'infront of', 'behind', 'riding', 'next to', 'turning right on', 'driving on', 'turning left on', 'is hitting']
 
@@ -297,56 +297,60 @@ class CarlaDataset(Dataset):
         return image_path
     
     def __getitem__(self, index):
-        use_real = self.dataset_real and self.use_real_now
+        # use_real = self.dataset_real and self.use_real_now
 
-        if use_real:
-            real_idx = (index // 2) % len(self.real_images)
-            image_info = self.real_images[real_idx]
-            image_id = image_info['id']
-            dataset, typo, image_name, city = self.parse_filename(image_info['file_name'])
+        # if use_real:
+        #     real_idx = (index // 2) % len(self.real_images)
+        #     image_info = self.real_images[real_idx]
+        #     image_id = image_info['id']
+        #     dataset, typo, image_name, city = self.parse_filename(image_info['file_name'])
 
-            image = Image.open(self.parse_path(dataset, typo, image_name, city)).convert("RGB")
-            annots = self.image_id_to_annotations.get(image_id, [])
+        #     image = Image.open(self.parse_path(dataset, typo, image_name, city)).convert("RGB")
+        #     annots = self.image_id_to_annotations.get(image_id, [])
 
-            boxes = []
-            labels = []
+        #     boxes = []
+        #     labels = []
 
-            for ann in annots:
-                bbox = ann['bbox']  # COCO format: [x, y, width, height]
-                x, y, w, h = bbox
-                boxes.append([x, y, x + w, y + h])
-                labels.append(ann['category_id'])
+        #     for ann in annots:
+        #         bbox = ann['bbox']  # COCO format: [x, y, width, height]
+        #         x, y, w, h = bbox
+        #         boxes.append([x, y, x + w, y + h])
+        #         labels.append(ann['category_id'])
 
-            if len(boxes) == 0:
-                index = random.randint(0, len(self.real_images) - 1)
-                return self.__getitem__(index)
+        #     if len(boxes) == 0:
+        #         index = random.randint(0, len(self.real_images) - 1)
+        #         return self.__getitem__(index)
 
-            target = {
-                "labels": torch.tensor(labels, dtype=torch.long),
-                "boxes": torch.tensor(boxes, dtype=torch.float32),
-                "rel_annotations":  torch.full((1, 3), -1, dtype=torch.long), #placeholder
-                "image_id": torch.tensor([index]),
-                "orig_size": torch.tensor((2048, 1024)),
-            }
+        #     target = {
+        #         "labels": torch.tensor(labels, dtype=torch.long),
+        #         "boxes": torch.tensor(boxes, dtype=torch.float32),
+        #         "rel_annotations":  torch.full((1, 3), -1, dtype=torch.long), #placeholder
+        #         "image_id": torch.tensor([index]),
+        #         "orig_size": torch.tensor((2048, 1024)),
+        #     }
 
-        else:
-            carla_idx = (index // 2) % len(self.image_ids_carla)
-            image_id = self.image_ids_carla[carla_idx]
-            target_data = self.dataset_carla[image_id]
+        # else:
+        carla_idx = index #(index // 2) % len(self.image_ids_carla)
+        image_id = self.image_ids_carla[carla_idx]
+        target_data = self.dataset_carla[image_id]
 
-            image = self.load_image(image_id)
-            target = {
-                "labels": torch.tensor(target_data['labels'], dtype=torch.long),
-                "boxes": torch.tensor(target_data['boxes'], dtype=torch.float32),
-                "rel_annotations": torch.tensor(target_data['rel_annotations'], dtype=torch.long),
-                "image_id": torch.tensor([index]),
-                "orig_size": torch.tensor((1920, 1080)),
+        fixed_labels = [label + 1 for label in target_data['labels']]
+        fixed_rel_annotations = [[sub, obj, rel + 1] for sub, obj, rel in target_data['rel_annotations']]
+
+        image = self.load_image(image_id)
+        target = {
+            "labels": torch.tensor(fixed_labels, dtype=torch.long),
+            "boxes": torch.tensor(target_data['boxes'], dtype=torch.float32),
+            "rel_annotations": torch.tensor(fixed_rel_annotations, dtype=torch.long),
+            "image_id": torch.tensor([index]),
+            "orig_size": torch.tensor((1920, 1080)),
+
             }
 
         if self.transforms:
             image, target = self.transforms(image, target)
 
-        return image, target
+        return image, target, image_id
     
 
 

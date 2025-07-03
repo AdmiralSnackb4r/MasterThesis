@@ -24,8 +24,8 @@ def get_args_parser():
     # image path
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
     #                      help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\VehicleTurningRight_6\\rgb\\filtered\\00029257.png',
-                         help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\FollowLeadingVehicle_1\\rgb\\filtered\\00006544.png',
+    #                     help="Path of the test image")
     # parser.add_argument('--img_path', type=str, default='demo/cat.jpg',
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\val\\ab309345-00000000.jpg',
@@ -38,6 +38,11 @@ def get_args_parser():
     #                      help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\06_images\\images\\14017.png',
     #                      help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000061_000019_leftImg8bit.png',
+                          help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\VehicleTurningRight_7\\rgb\\filtered\\00008826.png',
+    #                     help="Path of the test image")
+
 
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -48,9 +53,9 @@ def get_args_parser():
                         help="Type of positional embedding to use on top of the image features")
 
     # * Transformer
-    parser.add_argument('--enc_layers', default=4, type=int,
+    parser.add_argument('--enc_layers', default=6, type=int,
                         help="Number of encoding layers in the transformer")
-    parser.add_argument('--dec_layers', default=4, type=int,
+    parser.add_argument('--dec_layers', default=6, type=int,
                         help="Number of decoding layers in the transformer")
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
@@ -58,9 +63,9 @@ def get_args_parser():
                         help="Size of the embeddings (dimension of the transformer)")
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
-    parser.add_argument('--nheads', default=4, type=int,
+    parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_entities', default=100, type=int,
+    parser.add_argument('--num_entities', default=300, type=int,
                         help="Number of query slots")
     parser.add_argument('--num_triplets', default=200, type=int,
                         help="Number of query slots")
@@ -72,7 +77,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim\\checkpoint0199.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint_re_0619.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -297,7 +302,7 @@ def main(args):
         return b
 
     # Carla classes
-    CLASSES = [ 'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light', 'traffic sign', 'person', 'car', 'truck', 'bicycle']
+    CLASSES = [ 'N/A', 'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light', 'traffic sign', 'person', 'car', 'truck', 'bicycle']
     #CLASSES = [ 'road', 'side walk', 'ground', 'pole', 'traffic light', 'traffic sign', 'person', 'car', 'truck', 'bicycle', 'bridge']
 
     # 2 -> 1
@@ -312,7 +317,7 @@ def main(args):
     # 10 -> 9
     # 3 -> 10
 
-    REL_CLASSES = ['on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
+    REL_CLASSES = ['__background__', 'on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
                    'infront of', 'behind', 'riding', 'next to', 'turning right on', 'driving on', 'turning left on', 'is hitting']
     
     #REL_CLASSES = ['on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of', 'driving from left to right', 'driving from right to left', 'on middle lane of',
@@ -366,20 +371,20 @@ def main(args):
     img = transform(im).unsqueeze(0)
 
     # propagate through the model
-    outputs, subm, objm = model(img)
+    outputs = model(img)
 
     # keep only predictions with 0.+ confidence
     probas = outputs['rel_logits'].softmax(-1)[0, :, :-1]
     probas_sub = outputs['sub_logits'].softmax(-1)[0, :, :-1]
     probas_obj = outputs['obj_logits'].softmax(-1)[0, :, :-1]
-    keep = torch.logical_and(probas.max(-1).values > 0.3, torch.logical_and(probas_sub.max(-1).values > 0.3,
+    keep = torch.logical_or(probas.max(-1).values > 0.3, torch.logical_or(probas_sub.max(-1).values > 0.3,
                                                                             probas_obj.max(-1).values > 0.3))
 
     # convert boxes from [0; 1] to image scales
     sub_bboxes_scaled = rescale_bboxes(outputs['sub_boxes'][0, keep], im.size)
     obj_bboxes_scaled = rescale_bboxes(outputs['obj_boxes'][0, keep], im.size)
 
-    topk = 20
+    topk = 100
     keep_queries = torch.nonzero(keep, as_tuple=True)[0]
     indices = torch.argsort(-probas[keep_queries].max(-1)[0] * probas_sub[keep_queries].max(-1)[0] * probas_obj[keep_queries].max(-1)[0])[:topk]
     keep_queries = keep_queries[indices]
@@ -430,29 +435,92 @@ def main(args):
         avg_dec_attn_weights_sub = torch.stack(dec_attn_weights_sub_list, dim=0).mean(dim=0)
         avg_dec_attn_weights_obj = torch.stack(dec_attn_weights_obj_list, dim=0).mean(dim=0)
 
+        subject_filter = None  # e.g., "car" to filter only "car" subjects
+        object_filter = None   # e.g., "traffic light" to filter only "traffic light" object
+
         # get the feature map shape
         h, w = conv_features['0'].tensors.shape[-2:]
         im_w, im_h = im.size
+        vis = []
 
-        fig, axs = plt.subplots(ncols=len(indices), nrows=3, figsize=(22, 7))
+        fig, axs = plt.subplots(ncols=20, nrows=3, figsize=(22, 7))
         for idx, ax_i, (sxmin, symin, sxmax, symax), (oxmin, oymin, oxmax, oymax) in \
                 zip(keep_queries, axs.T, sub_bboxes_scaled[indices], obj_bboxes_scaled[indices]):
+            
+            subj_cls = CLASSES[probas_sub[idx].argmax()]
+            obj_cls = CLASSES[probas_obj[idx].argmax()]
+
+
+            # Apply subject and object filters
+            if subject_filter and subj_cls != subject_filter:
+                ax_i_tmp = ax_i
+                continue
+            else:
+                ax_i_tmp = None
+            if object_filter and obj_cls != object_filter:
+                ax_i_tmp = ax_i
+                continue
+            else:
+                ax_i_tmp = None
+
+            print(ax_i)
+
+            #idx_plot = idx
+            #if idx_plot == 3 :
+            #    idx_plot = 1
+
+            if ax_i_tmp is not None:
+                ax_i = ax_i_tmp
+
+            img_up = avg_dec_attn_weights_sub[0, idx].view(h, w)
+            title_up = f'query id: {idx.item()}'
+            img_down = avg_dec_attn_weights_obj[0, idx].view(h, w)
+            img_rgb = im
+            patch_up = plt.Rectangle((sxmin, symin), sxmax - sxmin, symax - symin,
+                                       fill=False, color='blue', linewidth=2.5)
+            patch_down = plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
+                                       fill=False, color='orange', linewidth=2.5)
+            title = f"{CLASSES[probas_sub[idx].argmax()]} {REL_CLASSES[probas[idx].argmax()]} {CLASSES[probas_obj[idx].argmax()]}"
+
+            vis.append((img_up, title_up, img_down, img_rgb, patch_up, patch_down, title))
+
+            # ax = ax_i[0]
+            # ax.imshow(avg_dec_attn_weights_sub[0, idx].view(h, w))
+            # ax.axis('off')
+            # ax.set_title(f'query id: {idx.item()}')
+            # ax = ax_i[1]
+            # ax.imshow(avg_dec_attn_weights_obj[0, idx].view(h, w))
+            # ax.axis('off')
+            # ax = ax_i[2]
+            # ax.imshow(im)
+            # ax.add_patch(plt.Rectangle((sxmin, symin), sxmax - sxmin, symax - symin,
+            #                            fill=False, color='blue', linewidth=2.5))
+            # ax.add_patch(plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
+            #                            fill=False, color='orange', linewidth=2.5))
+
+            # ax.axis('off')
+            # ax.set_title(CLASSES[probas_sub[idx].argmax()]+' '+REL_CLASSES[probas[idx].argmax()]+' '+CLASSES[probas_obj[idx].argmax()])
+
+
+
+
+        fig, axs = plt.subplots(ncols=10, nrows=3, figsize=(22, 7))
+        for idx, ax_i, vi in \
+                zip(keep_queries, axs.T, vis):
             ax = ax_i[0]
-            ax.imshow(avg_dec_attn_weights_sub[0, idx].view(h, w))
+            ax.imshow(vi[0])
             ax.axis('off')
-            ax.set_title(f'query id: {idx.item()}')
+            ax.set_title(vi[1])
             ax = ax_i[1]
-            ax.imshow(avg_dec_attn_weights_obj[0, idx].view(h, w))
+            ax.imshow(vi[2])
             ax.axis('off')
             ax = ax_i[2]
-            ax.imshow(im)
-            ax.add_patch(plt.Rectangle((sxmin, symin), sxmax - sxmin, symax - symin,
-                                       fill=False, color='blue', linewidth=2.5))
-            ax.add_patch(plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
-                                       fill=False, color='orange', linewidth=2.5))
+            ax.imshow(vi[3])
+            ax.add_patch(vi[4])
+            ax.add_patch(vi[5])
 
             ax.axis('off')
-            ax.set_title(CLASSES[probas_sub[idx].argmax()]+' '+REL_CLASSES[probas[idx].argmax()]+' '+CLASSES[probas_obj[idx].argmax()], fontsize=10)
+            ax.set_title(vi[6], fontsize=10)
 
         fig.tight_layout()
         plt.show()

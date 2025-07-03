@@ -1,0 +1,107 @@
+{
+    "all_classes": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "on": {
+        "R@20": 0.037961162986659844,
+        "R@50": 0.262289965658823,
+        "R@100": 0.5232522185933405
+    },
+    "attached to": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "on right side of": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "parking on": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "on left side of": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "same road line as": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "on right lane of": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "on opposing side of": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "on left lane of": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "driving from right to left": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "driving from left to right": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "on middle lane of": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "infront of": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "behind": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "riding": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "next to": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "turning right on": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "driving on": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "turning left on": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    },
+    "is hitting": {
+        "R@20": NaN,
+        "R@50": NaN,
+        "R@100": NaN
+    }
+}

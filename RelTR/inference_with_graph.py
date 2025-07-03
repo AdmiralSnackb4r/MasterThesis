@@ -22,10 +22,10 @@ def get_args_parser():
     parser.add_argument('--dataset', default='vg')
 
     # image path
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
-    #                      help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\FollowLeadingVehicle_1\\rgb\\filtered\\00007779.png',
-                         help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
+                          help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\FollowLeadingVehicle_3\\rgb\\filtered\\00021646.png',
+    #                     help="Path of the test image")
     # parser.add_argument('--img_path', type=str, default='demo/cat.jpg',
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\test\\d1b624d3-00000000.jpg',
@@ -36,6 +36,25 @@ def get_args_parser():
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000834_leftImg8bit.png',
     #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\aachen\\aachen_000157_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000061_000019_leftImg8bit.png',
+    #                      help="Path of the test image")       #left side debatable
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000009_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\jena\\jena_000001_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\jena\\jena_000099_000019_leftImg8bit.png',
+    #                     help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\jena\\jena_000105_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\jena\\jena_000056_000019_leftImg8bit.png',
+    #                      help="Path of the test image")       #gone wrong teribly
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000008_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000009_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+
 
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -70,7 +89,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint0309.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real_enfroze\\checkpoint_re_0524.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -134,8 +153,8 @@ def merge_predictions(net1_boxes, net2_boxes, net1_labels, net2_labels):
                 overlapping_indices.append(j)
 
         # If none overlap, fallback: use all candidates with same label
-        if not overlapping_indices:
-            overlapping_indices = candidate_indices
+        #if not overlapping_indices:
+        #    overlapping_indices = candidate_indices
 
         # If still no candidates, keep box2 as is
         if not overlapping_indices:
@@ -295,9 +314,9 @@ def main(args):
         return b
 
     # Carla classes
-    CLASSES = [ 'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light', 'traffic sign', 'person', 'car', 'truck', 'bicycle']
+    CLASSES = [ 'N', 'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light', 'traffic sign', 'person', 'car', 'truck', 'bicycle']
 
-    REL_CLASSES = ['on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
+    REL_CLASSES = [ 'N', 'on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
                    'infront of', 'behind', 'riding', 'next to', 'turning right on', 'driving on', 'turning left on', 'is hitting']
 
 
@@ -372,8 +391,8 @@ def main(args):
     keep_queries_entity = keep_queries_entity[indices_entity]
 
     # Keep relation queries with confidence > 0.5 in all three logits
-    keep = torch.logical_and(probas.max(-1).values > 0.,
-            torch.logical_and(probas_sub.max(-1).values > 0., probas_obj.max(-1).values > 0.))
+    keep = torch.logical_and(probas.max(-1).values > 0.7,
+            torch.logical_and(probas_sub.max(-1).values > 0.7, probas_obj.max(-1).values > 0.7))
 
     # Filter labels and boxes for subjects and objects accordingly
     labels_sub = probas_sub[keep].argmax(dim=1)
@@ -383,14 +402,14 @@ def main(args):
     obj_bboxes_scaled = rescale_bboxes(outputs['obj_boxes'][0, keep], im.size)
 
     #Merge boxes based on labels (you need your merge_predictions updated accordingly)
-    #sub_bboxes_scaled = merge_predictions(
-    #    bboxes_scaled, sub_bboxes_scaled, labels_entity, labels_sub)#
+    # sub_bboxes_scaled = merge_predictions(
+    #     bboxes_scaled, sub_bboxes_scaled, labels_entity, labels_sub)#
 
-    #obj_bboxes_scaled = merge_predictions(
-    #    bboxes_scaled, obj_bboxes_scaled, labels_entity, labels_obj)
+    # obj_bboxes_scaled = merge_predictions(
+    #     bboxes_scaled, obj_bboxes_scaled, labels_entity, labels_obj)
 
     # Select top 10 relation queries based on combined confidence score
-    topk = 10
+    topk = 20
     keep_queries = torch.nonzero(keep, as_tuple=True)[0]
     scores = probas[keep].max(-1)[0] * probas_sub[keep].max(-1)[0] * probas_obj[keep].max(-1)[0]
     indices = torch.argsort(-scores)[:topk]
@@ -499,6 +518,9 @@ def main(args):
         subj_box_to_node = {}
         obj_box_to_node = {}
 
+        subject_filter = None  # e.g., "car" to filter only "car" subjects
+        object_filter = None   # e.g., "traffic light" to filter only "traffic light" object
+
         duplicate_subj_indices = defaultdict(list)
         duplicate_obj_indices = defaultdict(list)
 
@@ -507,6 +529,8 @@ def main(args):
             box_key = round_box(sub_box)
             if box_key not in unique_subj_boxes:
                 subj_cls = CLASSES[probas_sub[idx].argmax()]
+                if subject_filter is not None and subj_cls != subject_filter:
+                    continue
                 node_name = f"Subj-{subj_cls}-{len(unique_subj_boxes)}"
                 unique_subj_boxes[box_key] = node_name
             subj_box_to_node[idx] = unique_subj_boxes[box_key]
@@ -517,6 +541,8 @@ def main(args):
             box_key = round_box(obj_box)
             if box_key not in unique_obj_boxes:
                 obj_cls = CLASSES[probas_obj[idx].argmax()]
+                if object_filter is not None and obj_cls != object_filter:
+                    continue
                 node_name = f"Obj-{obj_cls}-{len(unique_obj_boxes)}"
                 unique_obj_boxes[box_key] = node_name
             obj_box_to_node[idx] = unique_obj_boxes[box_key]
@@ -525,6 +551,8 @@ def main(args):
         # Step 2: Draw subject and object bounding boxes (only first per group)
         for idx in keep_queries:
             idx = int(idx)  # 🔥 Fix tensor key issue
+            if idx not in subj_box_to_node or idx not in obj_box_to_node:
+                continue
             subj_node = subj_box_to_node[idx]
             obj_node = obj_box_to_node[idx]
 
@@ -559,6 +587,8 @@ def main(args):
 
         for idx in keep_queries:
             idx = int(idx)
+            if idx not in subj_box_to_node or idx not in obj_box_to_node:
+                continue
             subj_node = subj_box_to_node[idx]
             obj_node = obj_box_to_node[idx]
             rel_cls = REL_CLASSES[probas[idx].argmax()]

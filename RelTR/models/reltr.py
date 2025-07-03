@@ -333,7 +333,6 @@ class SetCriterion(nn.Module):
                 t['boxes'][t["rel_annotations"][i, 1]]
                 for t, (_, i) in zip(targets, indices[1])
             ], dim=0)
-            target_entry_boxes = pred_boxes
         else:
           #print(f"placeholder found in boxes")
             # Avoid gradient updates when there are no valid annotations

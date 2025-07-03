@@ -4,7 +4,7 @@ import datasets.transforms as T
 import util.misc as utils
 from models import custom_build_model, build_model
 from datasets import build_custom_dataset, build_merged_dataset, build_carla_dataset
-from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from collections import OrderedDict
 from tqdm import tqdm
 import numpy as np
@@ -35,9 +35,9 @@ def get_args_parser():
                         help="Type of positional embedding to use on top of the image features")
 
     # * Transformer
-    parser.add_argument('--enc_layers', default=4, type=int,
+    parser.add_argument('--enc_layers', default=6, type=int,
                         help="Number of encoding layers in the transformer")
-    parser.add_argument('--dec_layers', default=4, type=int,
+    parser.add_argument('--dec_layers', default=6, type=int,
                         help="Number of decoding layers in the transformer")
     parser.add_argument('--dim_feedforward', default=2048, type=int,
                         help="Intermediate size of the feedforward layers in the transformer blocks")
@@ -45,9 +45,9 @@ def get_args_parser():
                         help="Size of the embeddings (dimension of the transformer)")
     parser.add_argument('--dropout', default=0.1, type=float,
                         help="Dropout applied in the transformer")
-    parser.add_argument('--nheads', default=4, type=int,
+    parser.add_argument('--nheads', default=8, type=int,
                         help="Number of attention heads inside the transformer's attentions")
-    parser.add_argument('--num_entities', default=100, type=int,
+    parser.add_argument('--num_entities', default=300, type=int,
                         help="Number of query slots")
     parser.add_argument('--num_triplets', default=200, type=int,
                         help="Number of query slots")
@@ -59,7 +59,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim\\checkpoint0199.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint_re_0294.pth', help='resume from checkpoint')
     #parser.add_argument('--eval', default='/p/scratch/hai_1008/kromm3/RelTR/eval/run_4/eval.json', help='place to store evaluation')
     parser.add_argument('--eval', default='RelTR\\eval\\run_12\\eval.json', help='place to store evaluation')
     parser.add_argument('--set_cost_class', default=1, type=float,
@@ -128,7 +128,7 @@ def main(args):
     dataset_test = build_carla_dataset(args=args, anno_carla='datasets\\annotations\\Carla\\test_dataset_pre.json', transform=make_transforms('val'))
 
     ckpt = torch.load(args.resume, weights_only=False)
-    sampler_test = RandomSampler(dataset_test)
+    sampler_test = SequentialSampler(dataset_test)
     data_loader_test = DataLoader(dataset_test, args.batch_size, sampler=sampler_test,
                                   drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
     model, _, _ = build_model(args)
@@ -145,11 +145,11 @@ def main(args):
     evaluator_list = []
 
     evaluation_out = {
-        "all_classes" : {
-            'R@20' : [],
-            'R@50' : [],
-            'R@100' : [],
-        },
+        # "all_classes" : {
+        #     'R@20' : [],
+        #     'R@50' : [],
+        #     'R@100' : [],
+        # },
     }
 
     for index, name in enumerate(data_loader_test.dataset.rel_categories):
@@ -163,11 +163,11 @@ def main(args):
     evaluator = BasicSceneGraphEvaluator(mode='sgdet')
     counter = 0
 
-    print(evaluation_out)
+    #print(evaluation_out)
 
 
     with torch.no_grad():
-        for samples, targets in tqdm(data_loader_test, desc="Collecting Ouputs", unit="batch"):
+        for samples, targets, image_ids in tqdm(data_loader_test, desc="Collecting Ouputs", unit="batch"):
             counter += 1
             targets = targets[0]
             samples.to(device)
@@ -177,7 +177,7 @@ def main(args):
                 'gt_boxes' : box_cxcywh_to_xyxy(targets['boxes']).cpu().numpy(),
                 'gt_classes' : targets['labels'].cpu().numpy()
             }
-            outputs, _, _ = model(samples)
+            outputs = model(samples)
 
             #print(outputs['sub_logits'].shape)
 
@@ -209,24 +209,46 @@ def main(args):
             #print("gt boxes: ", box_cxcywh_to_xyxy(targets['boxes']).cpu().numpy())
             #print("pred boxes: ", sub_bboxes)
 
-            res, output = evaluator.evaluate_scene_graph_entry(gt_entry, pred_entry)
+            #res, output = evaluator.evaluate_scene_graph_entry(gt_entry, pred_entry)
 
-            evaluation_out["all_classes"]['R@20'].append(output['R@20'])
-            evaluation_out["all_classes"]['R@50'].append(output['R@50'])
-            evaluation_out["all_classes"]['R@100'].append(output['R@100'])
+            #print(image_ids[0])
+
+
+
+            # evaluation_out[image_ids[0]] = {
+            #                 'R@20' : output['R@20'],
+            #                 'R@50' : output['R@50'],
+            #                 'R@100' : output['R@100']
+            #             }
+
+            # evaluation_out["all_classes"]['R@20'].append(output['R@20'])
+            # evaluation_out["all_classes"]['R@50'].append(output['R@50'])
+            # evaluation_out["all_classes"]['R@100'].append(output['R@100'])
 
             if evaluator_list is not None:
                 for pred_id, pred_name, evaluator_rel in evaluator_list:
-                    gt_entry_rel = gt_entry.copy()
-                    mask = np.in1d(gt_entry_rel['gt_relations'][:, -1], pred_id)
-                    gt_entry_rel['gt_relations'] = gt_entry_rel['gt_relations'][mask, :]
-                    if gt_entry_rel['gt_relations'].shape[0] == 0:
-                        continue
-                    #print("Relationship: ", pred_name)
-                    _, output = evaluator_rel.evaluate_scene_graph_entry(gt_entry_rel, pred_entry)
-                    evaluation_out[pred_name]['R@20'].append(output['R@20'])
-                    evaluation_out[pred_name]['R@50'].append(output['R@50'])
-                    evaluation_out[pred_name]['R@100'].append(output['R@100'])
+                    #if pred_id == 17:
+                        gt_entry_rel = gt_entry.copy()
+                        mask = np.in1d(gt_entry_rel['gt_relations'][:, -1], pred_id)
+                        gt_entry_rel['gt_relations'] = gt_entry_rel['gt_relations'][mask, :]
+                        if gt_entry_rel['gt_relations'].shape[0] == 0:
+                            continue
+                        #gt_entry_rel['gt_relations'][:, -1] += 1
+                        #print("Relationship: ", pred_name)
+                        #print("ground truth: ", gt_entry_rel)
+                        #print("prediction: ", pred_entry)
+                        _, output = evaluator_rel.evaluate_scene_graph_entry(gt_entry_rel, pred_entry)
+                        #print("R@20: ", output['R@20'])
+                        #print("R@50: ", output['R@50'])
+                        #print("R@100: ", output['R@100'])
+                        # evaluation_out[image_ids] = {
+                        #     'R@20' : output['R@20'],
+                        #     'R@50' : output['R@50'],
+                        #     'R@100' : output['R@100']
+                        # }
+                        evaluation_out[pred_name]['R@20'].append(output['R@20'])
+                        evaluation_out[pred_name]['R@50'].append(output['R@50'])
+                        evaluation_out[pred_name]['R@100'].append(output['R@100'])
             #print(res)
 
             del samples
@@ -237,7 +259,7 @@ def main(args):
             evaluation_out[entry]['R@50'] = float(np.mean(evaluation_out[entry]['R@50'])) 
             evaluation_out[entry]['R@100'] = float(np.mean(evaluation_out[entry]['R@100']))
 
-        with open("evaluation_out_only_sim.json", "w") as f:
+        with open("eval_sim_real_early.json", "w") as f:
             json.dump(evaluation_out, f, indent=4)
     
 
