@@ -158,6 +158,11 @@ class CarlaDataset(Dataset):
         # Ensure even interleaving
         return 2 * max(len(self.image_ids_carla), len(self.real_images))
     
+    def load_real_image(self, image_id):
+        dataset, typo, img_name, city = self.parse_filename(image_id)
+        image = Image.open(self.parse_path(dataset, typo, img_name, city)).convert("RGB")
+        return image
+    
     def load_image(self, image_id):
         if not self.seg_ins_use:
             img_type = 'rgb'
@@ -254,7 +259,7 @@ class CarlaDataset(Dataset):
         elif dataset == 'city':
             img_name = city + '_' + img_name
             typo = 'val' if 'test' in typo else 'train'
-            image_path = os.path.join(self.root_dir_real, 'CityScapes', 'leftImg8bit', typo, city, img_name)
+            image_path = os.path.join(self.root_dir_real, 'CityScapes', 'leftImg8bit', typo, city, img_name+".png")
         elif dataset == 'mappilary':
             typo = 'validation' if 'val' in typo else 'training'
             image_path = os.path.join(self.root_dir_real, 'Mappilary', typo, 'images', img_name) 

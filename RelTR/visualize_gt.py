@@ -11,11 +11,11 @@ import matplotlib.cm as cm
 
 # === Klassen ===
 CLASSES = [ 
-    'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light',
+    'na', 'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light',
     'traffic sign', 'person', 'car', 'truck', 'bicycle'
 ]
 REL_CLASSES = [
-    'on', 'attached to', 'on right side of', 'parking on', 'on left side of',
+    'na', 'on', 'attached to', 'on right side of', 'parking on', 'on left side of',
     'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of',
     'driving from right to left', 'driving from left to right', 'on middle lane of',
     'infront of', 'behind', 'riding', 'next to', 'turning right on', 'driving on',
@@ -23,12 +23,191 @@ REL_CLASSES = [
 ]
 
 # === Deine Annotation ===
-annotation = {
-    "labels": [7, 10, 2, 8, 1, 5, 4, 5, 5, 4, 4, 4, 4, 4, 4, 4],
-    "boxes": [[1193, 346, 1243, 435], [1165, 379, 1258, 437], [0, 299, 1919, 1079], [753, 500, 1138, 878], [0, 313, 1918, 1079], [816, 218, 821, 232], [729, 179, 935, 328], [867, 217, 872, 232], [926, 216, 931, 232], [928, 215, 1064, 311], [1109, 163, 1127, 328], [1199, 149, 1231, 327], [942, 103, 1103, 338], [592, 57, 791, 351], [1113, 0, 1180, 375], [182, 0, 294, 414]],
-    "rel_annotations": [[0, 1, 14], [1, 2, 0], [3, 4, 2], [3, 4, 6], [5, 6, 1], [7, 6, 1], [8, 6, 1], [9, 2, 0], [6, 2, 0], [10, 2, 0], [11, 2, 0], [12, 2, 0], [13, 2, 0], [14, 2, 0], [15, 2, 0]]
-}
+# annotation = {
+#     "labels": [7, 10, 2, 8, 1, 5, 4, 5, 5, 4, 4, 4, 4, 4, 4, 4],
+#     "boxes": [[1193, 346, 1243, 435], [1165, 379, 1258, 437], [0, 299, 1919, 1079], [753, 500, 1138, 878], [0, 313, 1918, 1079], [816, 218, 821, 232], [729, 179, 935, 328], [867, 217, 872, 232], [926, 216, 931, 232], [928, 215, 1064, 311], [1109, 163, 1127, 328], [1199, 149, 1231, 327], [942, 103, 1103, 338], [592, 57, 791, 351], [1113, 0, 1180, 375], [182, 0, 294, 414]],
+#     "rel_annotations": [[0, 1, 14], [1, 2, 0], [3, 4, 2], [3, 4, 6], [5, 6, 1], [7, 6, 1], [8, 6, 1], [9, 2, 0], [6, 2, 0], [10, 2, 0], [11, 2, 0], [12, 2, 0], [13, 2, 0], [14, 2, 0], [15, 2, 0]]
+# }
 
+annotation = {
+                "labels": [
+            5,
+            3,
+            5,
+            3,
+            5,
+            3,
+            5,
+            3,
+            6,
+            5,
+            6,
+            5,
+            6,
+            5,
+            5,
+            3,
+            5,
+            3
+        ],
+        "boxes": [
+            [
+                1680,
+                268,
+                1744,
+                415
+            ],
+            [
+                92,
+                443,
+                2089,
+                546
+            ],
+            [
+                1780,
+                213,
+                1844,
+                445
+            ],
+            [
+                25,
+                426,
+                2028,
+                529
+            ],
+            [
+                1832,
+                199,
+                1871,
+                327
+            ],
+            [
+                1386,
+                443,
+                2095,
+                520
+            ],
+            [
+                936,
+                219,
+                961,
+                469
+            ],
+            [
+                217,
+                440,
+                1356,
+                546
+            ],
+            [
+                1842,
+                238,
+                1881,
+                291
+            ],
+            [
+                1816,
+                167,
+                1864,
+                447
+            ],
+            [
+                1016,
+                205,
+                1057,
+                277
+            ],
+            [
+                1005,
+                3,
+                1039,
+                472
+            ],
+            [
+                906,
+                285,
+                1039,
+                342
+            ],
+            [
+                981,
+                252,
+                1040,
+                406
+            ],
+            [
+                980,
+                328,
+                1030,
+                441
+            ],
+            [
+                336,
+                440,
+                1158,
+                537
+            ],
+            [
+                801,
+                348,
+                874,
+                470
+            ],
+            [
+                346,
+                442,
+                1225,
+                529
+            ]
+        ],
+        "rel_annotations": [
+            [
+                0,
+                1,
+                1
+            ],
+            [
+                2,
+                3,
+                1
+            ],
+            [
+                4,
+                5,
+                1
+            ],
+            [
+                6,
+                7,
+                1
+            ],
+            [
+                8,
+                9,
+                2
+            ],
+            [
+                10,
+                11,
+                2
+            ],
+            [
+                12,
+                13,
+                2
+            ],
+            [
+                14,
+                15,
+                1
+            ],
+            [
+                16,
+                17,
+                1
+            ]
+        ]
+    }
 #image = Image.open(image_path)
 
 # === Hilfsfunktionen ===
@@ -154,5 +333,6 @@ def show_annotated_graph(image_path, annotation):
 
 # === 🔁 Lade DEIN Originalbild ===
 # Ersetze den Pfad durch deinen lokalen Dateipfad
-image_path = "F:\\scenario_runner-0.9.15\\Data\\_out\\VehicleTurningRight_7\\rgb\\filtered\\00008900.png"
+#image_path = "F:\\scenario_runner-0.9.15\\Data\\_out\\VehicleTurningRight_7\\rgb\\filtered\\00008900.png"
+image_path = "S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000107_leftImg8bit.png"
 show_annotated_graph(image_path, annotation)

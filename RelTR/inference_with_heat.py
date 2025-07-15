@@ -22,8 +22,8 @@ def get_args_parser():
     parser.add_argument('--dataset', default='vg')
 
     # image path
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
-    #                      help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
+                          help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\FollowLeadingVehicle_1\\rgb\\filtered\\00006544.png',
     #                     help="Path of the test image")
     # parser.add_argument('--img_path', type=str, default='demo/cat.jpg',
@@ -38,11 +38,13 @@ def get_args_parser():
     #                      help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\06_images\\images\\14017.png',
     #                      help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000061_000019_leftImg8bit.png',
-                          help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000061_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\VehicleTurningRight_7\\rgb\\filtered\\00008826.png',
     #                     help="Path of the test image")
-
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_5_3\\rgb\\filtered\\00002064.png',
+    #                     help="Path of the test image")
+    
 
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -77,7 +79,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint_re_0619.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real_enfcoder\\checkpoint_re_0539.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -436,7 +438,7 @@ def main(args):
         avg_dec_attn_weights_obj = torch.stack(dec_attn_weights_obj_list, dim=0).mean(dim=0)
 
         subject_filter = None  # e.g., "car" to filter only "car" subjects
-        object_filter = None   # e.g., "traffic light" to filter only "traffic light" object
+        object_filter = None  # e.g., "traffic light" to filter only "traffic light" object
 
         # get the feature map shape
         h, w = conv_features['0'].tensors.shape[-2:]

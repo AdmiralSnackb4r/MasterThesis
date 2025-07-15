@@ -18,10 +18,14 @@ def get_args_parser():
     # image path
     # parser.add_argument('--img_path', type=str, default='/p/scratch/hai_1008/kromm3/CityScapes/leftImg8bit/test/munich/munich_000195_000019_leftImg8bit.png',
     #                     help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\hamburg\\hamburg_000000_000629_leftImg8bit.png',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
     #                    help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_3_3\\rgb\\filtered\\00001758.png',
-                        help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_3_3\\rgb\\filtered\\00001758.png',
+                        #help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\test\\munich\\munich_000008_000019_leftImg8bit.png',
+    #                     help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_5_3\\rgb\\filtered\\00002064.png',
+                         help="Path of the test image")
 
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -56,7 +60,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint0309.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_tandem\\checkpoint_re_0479.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -100,7 +104,7 @@ def main(args):
 
 
     label_id = {
-    'ground' : 0, 'road' : 1, 'side walk' : 2, 'bridge' : 3, 'pole' : 4, 'traffic light' : 5, 'traffic sign' : 6, 'person' : 7, 'car' : 8, 'truck' : 9, 'bicycle' : 10
+    'n': 0 , 'ground' : 1, 'road' : 2, 'side walk' : 3, 'bridge' : 4, 'pole' : 5, 'traffic light' : 6, 'traffic sign' : 7, 'person' : 8, 'car' : 9, 'truck' : 10, 'bicycle' : 11
     }
 
     
@@ -138,7 +142,7 @@ def main(args):
     scores = probas.max(-1).values
 
     # Confidence threshold
-    conf_thresh = 0.99
+    conf_thresh = 0.5
     keep = scores > conf_thresh
 
     # Rescale boxes

@@ -169,10 +169,10 @@ class MergedCocoDataset(Dataset):
             return self.__getitem__(index)
 
 
-        if len(boxes) > self.max_length:
-            print("new max length found: ", len(boxes))
-            self.max_length = len(boxes)
-        self.average_length += len(boxes)
+        # if len(boxes) > self.max_length:
+        #     print("new max length found: ", len(boxes))
+        #     self.max_length = len(boxes)
+        # self.average_length += len(boxes)
         #print(f"length: {len(boxes)}")
         #print(f"average length: {self.average_length/self.itter_counter}")
         #print("len: ", len(boxes))

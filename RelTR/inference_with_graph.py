@@ -15,6 +15,11 @@ import torch.nn as nn
 import torch.nn.init as init
 import math
 from collections import defaultdict
+from torchvision.models import vgg19, VGG19_Weights
+import torchvision.transforms as transforms
+import torch.optim as optim
+import torchvision.transforms.functional as TF
+import torchvision.models as models
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -22,16 +27,16 @@ def get_args_parser():
     parser.add_argument('--dataset', default='vg')
 
     # image path
-    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
-                          help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\FollowLeadingVehicle_3\\rgb\\filtered\\00021646.png',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path_carla', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_5_3\\rgb\\filtered\\00002064.png',
     #                     help="Path of the test image")
     # parser.add_argument('--img_path', type=str, default='demo/cat.jpg',
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\test\\d1b624d3-00000000.jpg',
     #                     help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
-    #                      help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
+                          help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\Mappillary\\training\\images\\0gFsMvCekBJRwPYYl_k12Q.jpg',
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000834_leftImg8bit.png',
@@ -53,7 +58,11 @@ def get_args_parser():
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000008_000019_leftImg8bit.png',
     #                      help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000009_000019_leftImg8bit.png',
-    #                      help="Path of the test image")
+    #                     help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\dusseldorf\\dusseldorf_000206_000019_leftImg8bit.png',
+    #                     help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\test\\munich\\munich_000008_000019_leftImg8bit.png',
+    #                     help="Path of the test image")
 
 
     # * Backbone
@@ -89,7 +98,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real_enfroze\\checkpoint_re_0524.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint_re_0619.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -109,6 +118,11 @@ def get_args_parser():
     parser.add_argument('--return_interm_layers', action='store_true',
                         help="Return the fpn if there is the tag")
     return parser
+
+
+
+
+
 
 
 def box_center(box):
@@ -149,7 +163,7 @@ def merge_predictions(net1_boxes, net2_boxes, net1_labels, net2_labels):
         overlapping_indices = []
         for j in candidate_indices:
             box1 = net1_boxes[j]
-            if iou(box1, box2) > 0:
+            if iou(box1, box2) > 0.3:
                 overlapping_indices.append(j)
 
         # If none overlap, fallback: use all candidates with same label
@@ -292,11 +306,98 @@ def initialize_and_freeze(model, first_part_checkpoint_path):
     return model
 
 
+def style_transfer(content_path, style_path, image_size=600, steps=200, style_weight=1e10, content_weight=1):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Bild laden und vorbereiten
+    def load_image(img_path):
+        image = Image.open(img_path).convert('RGB')
+        transform = transforms.Compose([
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x[:3, :, :]),  # RGB
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        image = transform(image).unsqueeze(0)
+        return image.to(device)
+
+    content = load_image(content_path)
+    style = load_image(style_path)
+
+    # VGG19 laden
+    vgg = models.vgg19(weights=models.VGG19_Weights.DEFAULT).features.to(device).eval()
+
+    # Zielbild
+    target = nn.Parameter(content.clone().detach())
+
+    # Layer definieren
+    content_layers = ['conv_4']
+    style_layers = ['conv_1', 'conv_2', 'conv_3', 'conv_4', 'conv_5']
+
+    # Feature Extraction
+    def get_features(x, model, layers):
+        features = {}
+        i = 0
+        for layer in model.children():
+            x = layer(x)
+            if isinstance(layer, nn.Conv2d):
+                i += 1
+                name = f"conv_{i}"
+                if name in layers:
+                    features[name] = x
+        return features
+
+    # Gram-Matrix
+    def gram_matrix(tensor):
+        b, c, h, w = tensor.size()
+        tensor = tensor.view(c, h * w)
+        return torch.mm(tensor, tensor.t()) / (c * h * w)
+
+    # Features
+    content_features = get_features(content, vgg, content_layers)
+    content_features = {k: v.detach() for k, v in content_features.items()}
+    style_features = get_features(style, vgg, style_layers)
+    style_grams = {layer: gram_matrix(style_features[layer].detach()) for layer in style_features}
+
+    # Optimierer
+    optimizer = optim.Adam([target], lr=0.003)
+
+    # Optimierung
+    for step in range(steps):
+        target_features = get_features(target, vgg, content_layers + style_layers)
+
+        content_loss = torch.mean((target_features['conv_4'] - content_features['conv_4']) ** 2)
+        style_loss = 0
+        for layer in style_layers:
+            target_gram = gram_matrix(target_features[layer])
+            style_gram = style_grams[layer]
+            style_loss += torch.mean((target_gram - style_gram) ** 2)
+        total_loss = content_weight * content_loss + style_weight * style_loss
+
+        optimizer.zero_grad()
+        total_loss.backward()
+        optimizer.step()
+
+    # Tensor zurückwandeln in Bild
+    def im_convert(tensor):
+        image = tensor.to("cpu").clone().detach()
+        image = image.squeeze(0)
+        image = image * torch.tensor([0.229, 0.224, 0.225]).view(3,1,1)
+        image = image + torch.tensor([0.485, 0.456, 0.406]).view(3,1,1)
+        image = image.clamp(0, 1)
+        image = TF.to_pil_image(image)
+        return image
+    
+    #image = TF.to_pil_image(image)
+
+    return im_convert(target)
+
 
 def main(args):
 
     transform = T.Compose([
-        T.Resize(800),
+        T.Resize(1333),
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -314,9 +415,9 @@ def main(args):
         return b
 
     # Carla classes
-    CLASSES = [ 'N', 'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light', 'traffic sign', 'person', 'car', 'truck', 'bicycle']
+    CLASSES = [ 'N/A', 'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light', 'traffic sign', 'person', 'car', 'truck', 'bicycle']
 
-    REL_CLASSES = [ 'N', 'on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
+    REL_CLASSES = [ '__background__', 'on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
                    'infront of', 'behind', 'riding', 'next to', 'turning right on', 'driving on', 'turning left on', 'is hitting']
 
 
@@ -344,25 +445,29 @@ def main(args):
     #             'to', 'under', 'using', 'walking in', 'walking on', 'watching', 'wearing', 'wears', 'with']
 
 
+    #print(result)
+    #exit()
+
+# Count number of parameters
+
+    #img_path = args.img_path
+    #im = style_transfer(args.img_path, args.img_path_carla)
+    im = Image.open(args.img_path).convert("RGB")
+
+    torch.cuda.empty_cache()
+    torch.cuda.ipc_collect()
+
     model, _, _ = build_model(args)
     ckpt = torch.load(args.resume, weights_only=False)
     #result = check_frozen_weights_integrity(model, 'ckpt\\run_first_part\\checkpoint0248_.pth')
     #ckpt = merge_model(full_model='ckpt\\run_full_sim\\checkpoint0199.pth', first_part='ckpt\\run_first_part\\checkpoint0248_.pth')
     state_dict = ckpt['model'] if 'model' in ckpt else ckpt
 
-    #print(result)
-    #exit()
-
-# Count number of parameters
     total_params = sum(v.numel() for v in state_dict.values())
     print(f"Total parameters in checkpoint: {total_params:,}")
     model.load_state_dict(ckpt['model'])
     #model = initialize_and_freeze(model, first_part_checkpoint_path='ckpt\\run_first_part\\checkpoint0248_.pth')
     model.eval()
-
-    img_path = args.img_path
-    im = Image.open(img_path).convert("RGB")
-
 
     # mean-std normalize the input image (batch-size: 1)
     img = transform(im).unsqueeze(0)
@@ -402,11 +507,11 @@ def main(args):
     obj_bboxes_scaled = rescale_bboxes(outputs['obj_boxes'][0, keep], im.size)
 
     #Merge boxes based on labels (you need your merge_predictions updated accordingly)
-    # sub_bboxes_scaled = merge_predictions(
-    #     bboxes_scaled, sub_bboxes_scaled, labels_entity, labels_sub)#
+    sub_bboxes_scaled = merge_predictions(
+        bboxes_scaled, sub_bboxes_scaled, labels_entity, labels_sub)#
 
-    # obj_bboxes_scaled = merge_predictions(
-    #     bboxes_scaled, obj_bboxes_scaled, labels_entity, labels_obj)
+    obj_bboxes_scaled = merge_predictions(
+        bboxes_scaled, obj_bboxes_scaled, labels_entity, labels_obj)
 
     # Select top 10 relation queries based on combined confidence score
     topk = 20
@@ -441,7 +546,7 @@ def main(args):
     ]
     with torch.no_grad():
         # propagate through the model
-        outputs = model(img)
+        #outputs = model(img)
 
         for hook in hooks:
             hook.remove()
@@ -458,12 +563,12 @@ def main(args):
         dec_attn_weights_obj_list = dec_attn_weights_obj
 
 
-        # don't need the list anymore
-        conv_features = conv_features[0]
-        enc_attn_weights = enc_attn_weights[0]
-        dec_attn_weights_entity = dec_attn_weights_entity[0]
-        dec_attn_weights_sub = dec_attn_weights_sub[0]
-        dec_attn_weights_obj = dec_attn_weights_obj[0]
+        # # don't need the list anymore
+        # conv_features = conv_features[0]
+        # enc_attn_weights = enc_attn_weights[0]
+        # dec_attn_weights_entity = dec_attn_weights_entity[0]
+        # dec_attn_weights_sub = dec_attn_weights_sub[0]
+        # dec_attn_weights_obj = dec_attn_weights_obj[0]
 
         #attention_rollout(enc_attn_weights)
 
@@ -531,7 +636,8 @@ def main(args):
                 subj_cls = CLASSES[probas_sub[idx].argmax()]
                 if subject_filter is not None and subj_cls != subject_filter:
                     continue
-                node_name = f"Subj-{subj_cls}-{len(unique_subj_boxes)}"
+                print(sub_box, box_key)
+                node_name = f"{subj_cls}-X:{box_key[0]}-Y:{box_key[2]}"
                 unique_subj_boxes[box_key] = node_name
             subj_box_to_node[idx] = unique_subj_boxes[box_key]
             duplicate_subj_indices[unique_subj_boxes[box_key]].append(idx)
@@ -543,7 +649,7 @@ def main(args):
                 obj_cls = CLASSES[probas_obj[idx].argmax()]
                 if object_filter is not None and obj_cls != object_filter:
                     continue
-                node_name = f"Obj-{obj_cls}-{len(unique_obj_boxes)}"
+                node_name = f"{obj_cls}-X:{box_key[0]}-Y:{box_key[2]}"
                 unique_obj_boxes[box_key] = node_name
             obj_box_to_node[idx] = unique_obj_boxes[box_key]
             duplicate_obj_indices[unique_obj_boxes[box_key]].append(idx)
@@ -564,7 +670,7 @@ def main(args):
 
             if idx == duplicate_subj_indices[subj_node][0]:
                 sxmin, symin, sxmax, symax = subj_box_key
-                subj_cls = subj_node.split('-')[1]
+                subj_cls = subj_node.split('-')[0]
                 rect_s = plt.Rectangle((sxmin, symin), sxmax - sxmin, symax - symin,
                                     fill=False, edgecolor=subj_color, linewidth=3)
                 ax_left.add_patch(rect_s)
@@ -574,7 +680,7 @@ def main(args):
 
             if idx == duplicate_obj_indices[obj_node][0]:
                 oxmin, oymin, oxmax, oymax = obj_box_key
-                obj_cls = obj_node.split('-')[1]
+                obj_cls = obj_node.split('-')[0]
                 rect_o = plt.Rectangle((oxmin, oymin), oxmax - oxmin, oymax - oymin,
                                     fill=False, edgecolor=obj_color, linewidth=3)
                 ax_left.add_patch(rect_o)
@@ -599,6 +705,7 @@ def main(args):
         G = nx.DiGraph()
 
         for (subj_node, obj_node), rels in edge_relation_map.items():
+            print(subj_node)
             G.add_node(subj_node)
             G.add_node(obj_node)
 

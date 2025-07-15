@@ -10,6 +10,7 @@ from tqdm import tqdm
 import numpy as np
 from lib.evaluation.sg_eval import BasicSceneGraphEvaluator
 import json
+import math
 
 def get_args_parser():
     parser = argparse.ArgumentParser('Set transformer detector', add_help=False)
@@ -59,7 +60,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint_re_0294.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint_re_0619.pth', help='resume from checkpoint')
     #parser.add_argument('--eval', default='/p/scratch/hai_1008/kromm3/RelTR/eval/run_4/eval.json', help='place to store evaluation')
     parser.add_argument('--eval', default='RelTR\\eval\\run_12\\eval.json', help='place to store evaluation')
     parser.add_argument('--set_cost_class', default=1, type=float,
@@ -125,7 +126,8 @@ def main(args):
 
     device = torch.device(args.device)
 
-    dataset_test = build_carla_dataset(args=args, anno_carla='datasets\\annotations\\Carla\\test_dataset_pre.json', transform=make_transforms('val'))
+    dataset_test = build_carla_dataset(args=args,
+                                        anno_carla='datasets\\annotations\\Carla\\test_dataset_pre.json', transform=make_transforms('val'))
 
     ckpt = torch.load(args.resume, weights_only=False)
     sampler_test = SequentialSampler(dataset_test)
@@ -164,6 +166,74 @@ def main(args):
     counter = 0
 
     #print(evaluation_out)
+    def iou(box1, box2):
+        # box = [xmin, ymin, xmax, ymax]
+        xA = max(box1[0], box2[0])
+        yA = max(box1[1], box2[1])
+        xB = min(box1[2], box2[2])
+        yB = min(box1[3], box2[3])
+        inter_area = max(0, xB - xA) * max(0, yB - yA)
+        box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        union_area = box1_area + box2_area - inter_area
+        return inter_area / union_area if union_area > 0 else 0
+
+
+    def box_center(box):
+        """Calculate center (cx, cy) of a bounding box."""
+        x_min, y_min, x_max, y_max = box
+        return [(x_min + x_max) / 2, (y_min + y_max) / 2]
+
+    def euclidean_dist(c1, c2):
+        return math.sqrt((c1[0] - c2[0])**2 + (c1[1] - c2[1])**2)
+
+    def merge_predictions(net1_boxes, net2_boxes, net1_labels, net2_labels):
+        result = []
+
+        # print(net1_labels, net1_labels.shape)
+
+        # print("-----------")
+
+        # print(net2_labels, net2_labels.shape)
+
+        for i, box2 in enumerate(net2_boxes):
+            label2 = net2_labels[i].item()
+            box2_center = box_center(box2)
+
+            # Filter net1 boxes by same label
+            candidate_indices = [j for j, lbl in enumerate(net1_labels) if lbl.item() == label2]
+
+            # Further filter only boxes that overlap (iou > 0) with box2
+            overlapping_indices = []
+            for j in candidate_indices:
+                box1 = net1_boxes[j]
+                if iou(box1, box2) > 0:
+                    overlapping_indices.append(j)
+
+            # If none overlap, fallback: use all candidates with same label
+            #if not overlapping_indices:
+            #    overlapping_indices = candidate_indices
+
+            # If still no candidates, keep box2 as is
+            if not overlapping_indices:
+                result.append(box2)
+                continue
+
+            # Find the closest one among overlapping candidates
+            min_dist = float('inf')
+            best_idx = -1
+            for j in overlapping_indices:
+                box1 = net1_boxes[j]
+                dist = euclidean_dist(box_center(box1), box2_center)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_idx = j
+
+            # Merge with closest one
+            merged = net1_boxes[best_idx]
+            result.append(merged)
+
+        return torch.stack(result)
 
 
     with torch.no_grad():
@@ -181,7 +251,7 @@ def main(args):
 
             #print(outputs['sub_logits'].shape)
 
-            pred_logits = outputs['pred_logits'].squeeze(0).softmax(-1)
+            pred_logits = outputs['pred_logits'].softmax(-1)[0, :, :-1].argmax(dim=1)
             pred_boxes = outputs['pred_boxes'].squeeze(0)
 
             sub_bboxes = box_cxcywh_to_xyxy(outputs['sub_boxes']).cpu().clone()
@@ -190,8 +260,17 @@ def main(args):
             sub_bboxes = sub_bboxes.permute(0, 2, 1).reshape(-1, 4)  # (1, 200, 4) → (200, 4)
             obj_bboxes = obj_bboxes.permute(0, 2, 1).reshape(-1, 4)  # (1, 200, 4) → (200, 4)
 
+
+
             pred_sub_scores, pred_sub_classes = torch.max(outputs['sub_logits'].softmax(-1)[:, :, :-1], dim=2)
             pred_obj_scores, pred_obj_classes = torch.max(outputs['obj_logits'].softmax(-1)[:, :, :-1], dim=2)
+
+            # sub_bboxes = merge_predictions(
+            #     pred_boxes, sub_bboxes, pred_logits, pred_sub_classes.squeeze(0))#
+
+            # obj_bboxes = merge_predictions(
+            #     pred_boxes, obj_bboxes, pred_logits, pred_obj_classes.squeeze(0))
+
             rel_scores = outputs['rel_logits'][0][:, 1: -1].softmax(-1)
 
             pred_entry = {
@@ -259,7 +338,7 @@ def main(args):
             evaluation_out[entry]['R@50'] = float(np.mean(evaluation_out[entry]['R@50'])) 
             evaluation_out[entry]['R@100'] = float(np.mean(evaluation_out[entry]['R@100']))
 
-        with open("eval_sim_real_early.json", "w") as f:
+        with open("eval_enfcoder_sgg.json", "w") as f:
             json.dump(evaluation_out, f, indent=4)
     
 

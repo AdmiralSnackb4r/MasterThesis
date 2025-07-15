@@ -27,4 +27,4 @@ def compute_and_append_average_recall(json_path, output_path=None):
 
 # Example usage
 if __name__ == "__main__":
-    compute_and_append_average_recall("eval_enfcoder.json")  # Replace with your JSON file path
+    compute_and_append_average_recall("eval_tandem_on_real_sgg.json")  # Replace with your JSON file path

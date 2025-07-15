@@ -119,7 +119,7 @@ class CustomCocoDataset(Dataset):
             if self.transforms:
                 image, target = self.transforms(image, target)
 
-            return image, target
+            return image, target, image_info
         
         else:
             bboxes = torch.tensor([ann['bbox'] for ann in annotations])
