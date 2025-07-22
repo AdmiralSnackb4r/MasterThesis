@@ -4,7 +4,7 @@ import torch
 import argparse
 from pathlib import Path
 import util.misc as utils
-from datasets import build_custom_dataset, build_carla_dataset, build_merged_dataset
+from datasets import build_custom_dataset, build_carla_dataset, build_merged_dataset, build_gta_dataset
 from torch.utils.data import DataLoader
 import torchvision.transforms.v2 as v2
 import datasets.transforms as T
@@ -74,7 +74,7 @@ def get_args_parser():
     # dataset parameters
     parser.add_argument('--dataset', default='vg')
     parser.add_argument('--ann_path', default='./data/vg/', type=str)
-    parser.add_argument('--datapath_carla', default='/p/scratch/hai_1008/kromm3/Carla/Data', type=str)
+    parser.add_argument('--datapath', default='S:\\Datasets\\GTA\\Data\\images', type=str)
     parser.add_argument('--datapath_real', default='/p/scratch/hai_1008/kromm3', type=str)
 
 
@@ -134,9 +134,8 @@ def main(args):
     if args.frozen_weights is not None:
         assert args.masks, "Frozen training is meant for segmentation only"
     print(args)
-    test = build_carla_dataset(args,
-    anno_carla="/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Carla/train_dataset_pre.json",
-    anno_real="/p/home/jusers/kromm3/juwels/master/RelTR/datasets/annotations/Merged/merged_train.json",
+    test = build_gta_dataset(args,
+    anno_file='C:\\Users\\Edward\\Desktop\\UNI\\MasterThesis\\RelTR\\datasets\\annotations\\GTA\\gta_coco_dataset_train.json',
     transform=make_transforms('train')  # Or custom transform pipeline
     )
     sampler = torch.utils.data.RandomSampler(test)

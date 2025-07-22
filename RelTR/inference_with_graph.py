@@ -29,17 +29,17 @@ def get_args_parser():
     # image path
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000003_leftImg8bit.png',
     #                      help="Path of the test image")
-    #parser.add_argument('--img_path_carla', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_5_3\\rgb\\filtered\\00002064.png',
-    #                     help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\DynamicObjectCrossing_4_8\\rgb\\filtered\\00002629.png',
+                        help="Path of the test image")
     # parser.add_argument('--img_path', type=str, default='demo/cat.jpg',
     #                     help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\test\\d1b624d3-00000000.jpg',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\BDD100\\bdd100k_images_10k\\10k\\train\\0f31361a-7020f98e.jpg',
     #                     help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
-                          help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\Mappillary\\training\\images\\0gFsMvCekBJRwPYYl_k12Q.jpg',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\Mappillary\\testing\\images\\2pi-nHAei9kOMF1tGII6wg.jpg',
     #                     help="Path of the test image")
-    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train_extra\\bayreuth\\bayreuth_000000_000834_leftImg8bit.png',
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\test\\munich\\munich_000370_000019_leftImg8bit.png',
     #                      help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\aachen\\aachen_000157_000019_leftImg8bit.png',
     #                      help="Path of the test image")
@@ -56,14 +56,25 @@ def get_args_parser():
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\jena\\jena_000056_000019_leftImg8bit.png',
     #                      help="Path of the test image")       #gone wrong teribly
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000008_000019_leftImg8bit.png',
-    #                      help="Path of the test image")
+     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000009_000019_leftImg8bit.png',
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\dusseldorf\\dusseldorf_000206_000019_leftImg8bit.png',
     #                     help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\test\\munich\\munich_000008_000019_leftImg8bit.png',
     #                     help="Path of the test image")
-
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\test\\bonn\\bonn_000001_000019_leftImg8bit.png',
+    #                       help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\aachen\\aachen_000046_000019_leftImg8bit.png',
+    #                       help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='C:\\Users\\Edward\\Desktop\\Entspannt\\munich_000342_000019_leftImg8bit.png',
+    #                       help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\test\leverkusen\\leverkusen_000039_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\weimar\\weimar_000000_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\GTA\\IMAGES\\01_images\\images\\00025.png',
+    #                      help="Path of the test image")
 
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -98,7 +109,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint_re_0619.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_pseudo_2\\checkpoint_re_0239.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -397,7 +408,7 @@ def style_transfer(content_path, style_path, image_size=600, steps=200, style_we
 def main(args):
 
     transform = T.Compose([
-        T.Resize(1333),
+        T.Resize(800),
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -418,7 +429,7 @@ def main(args):
     CLASSES = [ 'N/A', 'ground', 'road', 'side walk', 'bridge', 'pole', 'traffic light', 'traffic sign', 'person', 'car', 'truck', 'bicycle']
 
     REL_CLASSES = [ '__background__', 'on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of', 'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
-                   'infront of', 'behind', 'riding', 'next to', 'turning right on', 'driving on', 'turning left on', 'is hitting']
+                  'infront of', 'behind', 'riding', 'next to', 'turning right on', 'driving on', 'turning left on', 'is hitting']
 
 
      # VG classes
@@ -507,11 +518,11 @@ def main(args):
     obj_bboxes_scaled = rescale_bboxes(outputs['obj_boxes'][0, keep], im.size)
 
     #Merge boxes based on labels (you need your merge_predictions updated accordingly)
-    sub_bboxes_scaled = merge_predictions(
-        bboxes_scaled, sub_bboxes_scaled, labels_entity, labels_sub)#
+    # sub_bboxes_scaled = merge_predictions(
+    #     bboxes_scaled, sub_bboxes_scaled, labels_entity, labels_sub)#
 
-    obj_bboxes_scaled = merge_predictions(
-        bboxes_scaled, obj_bboxes_scaled, labels_entity, labels_obj)
+    # obj_bboxes_scaled = merge_predictions(
+    #     bboxes_scaled, obj_bboxes_scaled, labels_entity, labels_obj)
 
     # Select top 10 relation queries based on combined confidence score
     topk = 20

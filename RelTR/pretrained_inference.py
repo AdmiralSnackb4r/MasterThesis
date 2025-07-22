@@ -24,8 +24,16 @@ def get_args_parser():
                         #help="Path of the test image")
     #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\test\\munich\\munich_000008_000019_leftImg8bit.png',
     #                     help="Path of the test image")
-    parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_5_3\\rgb\\filtered\\00002064.png',
-                         help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='F:\\scenario_runner-0.9.15\\Data\\_out\\OppositeVehicleRunningRedLight_5_3\\rgb\\filtered\\00002064.png',
+    #                     help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\cologne\\cologne_000082_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\test\\munich\\munich_000230_000019_leftImg8bit.png',
+                          help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\aachen\\aachen_000157_000019_leftImg8bit.png',
+    #                      help="Path of the test image")
+    #parser.add_argument('--img_path', type=str, default='S:\\Datasets\\CityScapes\\leftImg8bit\\train\\zurich\\zurich_000061_000019_leftImg8bit.png',
+    #                      help="Path of the test image")  
 
     # * Backbone
     parser.add_argument('--backbone', default='resnet50', type=str,
@@ -60,7 +68,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_tandem\\checkpoint_re_0479.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real_enfcoder\\checkpoint_re_0539.pth', help='resume from checkpoint')
     parser.add_argument('--set_cost_class', default=1, type=float,
                         help="Class coefficient in the matching cost")
     parser.add_argument('--set_cost_bbox', default=5, type=float,
@@ -142,7 +150,7 @@ def main(args):
     scores = probas.max(-1).values
 
     # Confidence threshold
-    conf_thresh = 0.5
+    conf_thresh = 0.99
     keep = scores > conf_thresh
 
     # Rescale boxes
@@ -175,10 +183,11 @@ def main(args):
                 break
 
         ax.text(
-            xmin, ymin - 5, f'{class_name} ({scores[keep][i]:.2f})',
-            fontsize=10, color=color, weight='bold',
-            bbox=dict(facecolor='black', alpha=0.5, pad=1)
-        )
+        xmin, ymin - 5, f'{class_name}',
+        fontsize=10, color='white',
+        bbox=dict(facecolor=color, edgecolor='black', boxstyle='round,pad=0.3', linewidth=1)
+    )
+
 
     ax.axis('off')
     plt.tight_layout()

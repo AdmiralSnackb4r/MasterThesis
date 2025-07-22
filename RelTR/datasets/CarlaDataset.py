@@ -110,16 +110,16 @@ class Preprocess():
 
 class CarlaDataset(Dataset):
     def __init__(self, root_dir_carla, anno_carla, anno_real=None, root_dir_real=None,
-                transforms=None, seg_ins_use=False):
+                transforms=None, seg_ins_use=False, pseudo=False):
         self.root_dir_carla = root_dir_carla
         self.anno_carla = anno_carla
         self.anno_real = anno_real
         self.seg_ins_use = seg_ins_use
         self.root_dir_real = root_dir_real
+        self.pseudo = pseudo
         self.load_annotation()
         self.transforms = transforms
         self.use_real_now = False
-
         # Categories for evaluation
         self.rel_categories = ['N/A', 'on', 'attached to', 'on right side of', 'parking on', 'on left side of', 'same road line as', 'on right lane of',
                             'on opposing side of', 'on left lane of', 'driving from right to left', 'driving from left to right', 'on middle lane of',
@@ -135,19 +135,22 @@ class CarlaDataset(Dataset):
         if self.anno_real:
             with open(self.anno_real, "r") as f:
                 self.dataset_real = json.load(f)
-            self.real_images = self.dataset_real['images']
-            self.annotations_real = self.dataset_real['annotations']
+            if not self.pseudo:
+                self.real_images = self.dataset_real['images']
+                self.annotations_real = self.dataset_real['annotations']
 
-            # Index annotations by image_id
-            self.image_id_to_annotations = {}
-            for ann in self.annotations_real:
-                img_id = ann['image_id']
-                if img_id not in self.image_id_to_annotations:
-                    self.image_id_to_annotations[img_id] = []
-                self.image_id_to_annotations[img_id].append(ann)
+                # Index annotations by image_id
+                self.image_id_to_annotations = {}
+                for ann in self.annotations_real:
+                    img_id = ann['image_id']
+                    if img_id not in self.image_id_to_annotations:
+                        self.image_id_to_annotations[img_id] = []
+                    self.image_id_to_annotations[img_id].append(ann)
 
-            # Optional: map file names to paths
-            self.id_to_filename = {img['id']: img['file_name'] for img in self.real_images}
+                # Optional: map file names to paths
+                self.id_to_filename = {img['id']: img['file_name'] for img in self.real_images}
+            else:
+                self.real_images = list(self.dataset_real.keys())
         else:
             self.dataset_real = None
             self.image_ids_real = []
@@ -257,9 +260,13 @@ class CarlaDataset(Dataset):
         if dataset == 'bdd':
             image_path = os.path.join(self.root_dir_real, 'BDD100', 'bdd100k_images_10k', '10k', typo, strip_bdd_suffix(img_name))
         elif dataset == 'city':
-            img_name = city + '_' + img_name
-            typo = 'val' if 'test' in typo else 'train'
-            image_path = os.path.join(self.root_dir_real, 'CityScapes', 'leftImg8bit', typo, city, img_name+".png")
+            #img_name = city + '_' + img_name
+            if self.pseudo:
+                image_path = os.path.join(self.root_dir_real, 'CityScapes', 'leftImg8bit', typo, city, img_name+"_leftImg8bit.png")
+            else:
+                img_name = city + '_' + img_name
+                typo = 'val' if 'test' in typo else 'train'
+                image_path = os.path.join(self.root_dir_real, 'CityScapes', 'leftImg8bit', typo, city, img_name+".png")
         elif dataset == 'mappilary':
             typo = 'validation' if 'val' in typo else 'training'
             image_path = os.path.join(self.root_dir_real, 'Mappilary', typo, 'images', img_name) 
@@ -302,55 +309,74 @@ class CarlaDataset(Dataset):
         return image_path
     
     def __getitem__(self, index):
-        # use_real = self.dataset_real and self.use_real_now
+        use_real = self.dataset_real and self.use_real_now
+        #use_real = True
+        if use_real:
+            real_idx = (index // 2) % len(self.real_images)
+            image_info = self.real_images[real_idx]
 
-        # if use_real:
-        #     real_idx = (index // 2) % len(self.real_images)
-        #     image_info = self.real_images[real_idx]
-        #     image_id = image_info['id']
-        #     dataset, typo, image_name, city = self.parse_filename(image_info['file_name'])
 
-        #     image = Image.open(self.parse_path(dataset, typo, image_name, city)).convert("RGB")
-        #     annots = self.image_id_to_annotations.get(image_id, [])
+            if not self.pseudo:
+                image_id = image_info['id']
+                dataset, typo, image_name, city = self.parse_filename(image_info['file_name'])
 
-        #     boxes = []
-        #     labels = []
+                image = Image.open(self.parse_path(dataset, typo, image_name, city)).convert("RGB")
+                annots = self.image_id_to_annotations.get(image_id, [])
 
-        #     for ann in annots:
-        #         bbox = ann['bbox']  # COCO format: [x, y, width, height]
-        #         x, y, w, h = bbox
-        #         boxes.append([x, y, x + w, y + h])
-        #         labels.append(ann['category_id'])
+                boxes = []
+                labels = []
 
-        #     if len(boxes) == 0:
-        #         index = random.randint(0, len(self.real_images) - 1)
-        #         return self.__getitem__(index)
+                for ann in annots:
+                    bbox = ann['bbox']  # COCO format: [x, y, width, height]
+                    x, y, w, h = bbox
+                    boxes.append([x, y, x + w, y + h])
+                    labels.append(ann['category_id'])
 
-        #     target = {
-        #         "labels": torch.tensor(labels, dtype=torch.long),
-        #         "boxes": torch.tensor(boxes, dtype=torch.float32),
-        #         "rel_annotations":  torch.full((1, 3), -1, dtype=torch.long), #placeholder
-        #         "image_id": torch.tensor([index]),
-        #         "orig_size": torch.tensor((2048, 1024)),
-        #     }
+                if len(boxes) == 0:
+                    index = random.randint(0, len(self.real_images) - 1)
+                    return self.__getitem__(index)
 
-        # else:
-        carla_idx = index #(index // 2) % len(self.image_ids_carla)
-        image_id = self.image_ids_carla[carla_idx]
-        target_data = self.dataset_carla[image_id]
+                target = {
+                    "labels": torch.tensor(labels, dtype=torch.long),
+                    "boxes": torch.tensor(boxes, dtype=torch.float32),
+                    "rel_annotations":  torch.full((1, 3), -1, dtype=torch.long), #placeholder
+                    "image_id": torch.tensor([index]),
+                    "orig_size": torch.tensor((2048, 1024)),
+                }
+            else:
+                annotations = self.dataset_real[image_info]
+                image = Image.open(self.parse_path('city', typo=annotations['gt_&_city'][1], img_name=image_info, city=annotations['gt_&_city'][2]))
+                image_id = image_info
 
-        fixed_labels = [label + 1 for label in target_data['labels']]
-        fixed_rel_annotations = [[sub, obj, rel + 1] for sub, obj, rel in target_data['rel_annotations']]
+                labels = annotations['labels']
+                boxes = annotations['boxes']
+                rel_annotations = annotations['rel_annotations']
 
-        image = self.load_image(image_id)
-        target = {
-            "labels": torch.tensor(fixed_labels, dtype=torch.long),
-            "boxes": torch.tensor(target_data['boxes'], dtype=torch.float32),
-            "rel_annotations": torch.tensor(fixed_rel_annotations, dtype=torch.long),
-            "image_id": torch.tensor([index]),
-            "orig_size": torch.tensor((1920, 1080)),
+                target = {
+                    "labels": torch.tensor(labels, dtype=torch.long),
+                    "boxes": torch.tensor(boxes, dtype=torch.float32),
+                    "rel_annotations":  torch.tensor(rel_annotations, dtype=torch.long),
+                    "image_id": torch.tensor([index]),
+                    "orig_size": torch.tensor((2048, 1024)),
+                }
 
-            }
+        else:
+            carla_idx = index #(index // 2) % len(self.image_ids_carla)
+            image_id = self.image_ids_carla[carla_idx]
+            target_data = self.dataset_carla[image_id]
+
+            fixed_labels = [label + 1 for label in target_data['labels']]
+            fixed_rel_annotations = [[sub, obj, rel + 1] for sub, obj, rel in target_data['rel_annotations']]
+
+            image = self.load_real_image(image_id)
+            target = {
+                "labels": torch.tensor(fixed_labels, dtype=torch.long),
+                "boxes": torch.tensor(target_data['boxes'], dtype=torch.float32),
+                "rel_annotations": torch.tensor(fixed_rel_annotations, dtype=torch.long),
+                "image_id": torch.tensor([index]),
+                "orig_size": torch.tensor((1920, 1080)),
+
+                }
 
         if self.transforms:
             image, target = self.transforms(image, target)

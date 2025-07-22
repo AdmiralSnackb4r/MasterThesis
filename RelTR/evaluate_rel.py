@@ -60,7 +60,7 @@ def get_args_parser():
 
     parser.add_argument('--device', default='cpu',
                         help='device to use for training / testing')
-    parser.add_argument('--resume', default='ckpt\\run_full_sim_from_sim_and_real\\checkpoint_re_0619.pth', help='resume from checkpoint')
+    parser.add_argument('--resume', default='ckpt\\run_pseudo\\checkpoint_re_0359.pth', help='resume from checkpoint')
     #parser.add_argument('--eval', default='/p/scratch/hai_1008/kromm3/RelTR/eval/run_4/eval.json', help='place to store evaluation')
     parser.add_argument('--eval', default='RelTR\\eval\\run_12\\eval.json', help='place to store evaluation')
     parser.add_argument('--set_cost_class', default=1, type=float,
@@ -127,7 +127,7 @@ def main(args):
     device = torch.device(args.device)
 
     dataset_test = build_carla_dataset(args=args,
-                                        anno_carla='datasets\\annotations\\Carla\\test_dataset_pre.json', transform=make_transforms('val'))
+                                        anno_carla='datasets\\annotations\\CityScapes\\converted_relationship_dataset.json', transform=make_transforms('val'))
 
     ckpt = torch.load(args.resume, weights_only=False)
     sampler_test = SequentialSampler(dataset_test)
@@ -338,7 +338,7 @@ def main(args):
             evaluation_out[entry]['R@50'] = float(np.mean(evaluation_out[entry]['R@50'])) 
             evaluation_out[entry]['R@100'] = float(np.mean(evaluation_out[entry]['R@100']))
 
-        with open("eval_enfcoder_sgg.json", "w") as f:
+        with open("eval_pseudo_phrase_real.json", "w") as f:
             json.dump(evaluation_out, f, indent=4)
     
 
